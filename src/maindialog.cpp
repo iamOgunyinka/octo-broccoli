@@ -1,17 +1,18 @@
 #include "maindialog.hpp"
 
-#include "ui_maindialog.h"
 #include "container.hpp"
+#include "ui_maindialog.h"
 
-#include <QNetworkRequest>
-#include <QJsonObject>
-#include <QJsonDocument>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMessageBox>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 
-static char const * const futures_tokens_url =
+static char const *const futures_tokens_url =
     "https://fapi.binance.com/fapi/v1/ticker/price";
-static char const * const spots_tokens_url =
+static char const *const spots_tokens_url =
     "https://api.binance.com/api/v3/ticker/price";
 
 namespace brocolli {
@@ -22,27 +23,23 @@ QSslConfiguration getSSLConfig() {
   return ssl_config;
 }
 
-void configureRequestForSSL(QNetworkRequest& request)
-{
+void configureRequestForSSL(QNetworkRequest &request) {
   request.setSslConfiguration(getSSLConfig());
 }
 
-brocolli::token_list_t::iterator
-findToken(brocolli::token_list_t& tokenList, QString const &tokenName) {
+brocolli::token_list_t::iterator findToken(brocolli::token_list_t &tokenList,
+                                           QString const &tokenName) {
   return std::lower_bound(tokenList.begin(), tokenList.end(), tokenName,
                           brocolli::token_compare_t{});
 }
 
-}
+} // namespace brocolli
 
 MainDialog::MainDialog(QWidget *parent)
-  : QDialog(parent)
-  , ui(new Ui::MainDialog)
-{
+    : QDialog(parent), ui(new Ui::MainDialog) {
   ui->setupUi(this);
   setWindowIcon(qApp->style()->standardPixmap(QStyle::SP_DesktopIcon));
-  setWindowFlags(windowFlags() |
-                 Qt::WindowMinimizeButtonHint |
+  setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint |
                  Qt::WindowMaximizeButtonHint);
   getSpotsTokens();
   getFuturesTokens();
@@ -89,12 +86,40 @@ MainDialog::MainDialog(QWidget *parent)
     delete item;
     delete ui->priceListWidget->takeItem(currentRow);
   });
+
+  /* Add graph and set the curve line color to green */
+  ui->customPlot->addGraph();
+  ui->customPlot->graph(0)->setPen(QPen(Qt::red));
+  ui->customPlot->graph(0)->setAntialiasedFill(false);
+
+  /* Configure x-Axis as time in secs */
+  QSharedPointer<QCPAxisTickerTime> timeTicker(new QCPAxisTickerTime);
+  timeTicker->setTimeFormat("%s");
+  ui->customPlot->xAxis->setTicker(timeTicker);
+  ui->customPlot->axisRect()->setupFullAxesBox();
+
+  /* Configure x and y-Axis to display Labels */
+  ui->customPlot->xAxis->setTickLabelFont(QFont(QFont().family(),8));
+  ui->customPlot->yAxis->setTickLabelFont(QFont(QFont().family(),8));
+  ui->customPlot->xAxis->setLabel("Time(s)");
+  ui->customPlot->yAxis->setLabel("Prices");
+
+  /* Make top and right axis visible, but without ticks and label */
+  ui->customPlot->xAxis2->setVisible(true);
+  ui->customPlot->yAxis->setVisible(true);
+  ui->customPlot->xAxis2->setTicks(false);
+  ui->customPlot->yAxis2->setTicks(false);
+  ui->customPlot->xAxis2->setTickLabels(false);
+  ui->customPlot->yAxis2->setTickLabels(false);
+
+  /* Set up and initialize the graph plotting timer */
+  QObject::connect(&m_timerPlot, &QTimer::timeout, this, [this] {
+    realTimePlot();
+  });
+  m_timerPlot.start(500);
 }
 
-MainDialog::~MainDialog()
-{
-  delete ui;
-}
+MainDialog::~MainDialog() { delete ui; }
 
 void MainDialog::tokenRemoved(QString const &text) {
   if (text.lastIndexOf(" (SPOT)") != -1) {
@@ -122,9 +147,9 @@ void MainDialog::tokenRemoved(QString const &text) {
 }
 
 void MainDialog::getSpotsTokens() {
-  auto callback = [this](brocolli::token_list_t && list) {
+  auto callback = [this](brocolli::token_list_t &&list) {
     ui->spotCombo->clear();
-    for (auto const &d: list)
+    for (auto const &d : list)
       ui->spotCombo->addItem(d.tokenName.toUpper());
     m_spotData = std::move(list);
   };
@@ -134,66 +159,70 @@ void MainDialog::getSpotsTokens() {
 
 void MainDialog::getFuturesTokens() {
   auto const url = QUrl(futures_tokens_url);
-  auto callback = [this](brocolli::token_list_t && list) {
+  auto callback = [this](brocolli::token_list_t &&list) {
     ui->futuresCombo->clear();
-    for (auto const &d: list)
+    for (auto const &d : list)
       ui->futuresCombo->addItem(d.tokenName.toUpper());
     m_futuresData = std::move(list);
   };
   sendNetworkRequest(url, callback);
 }
 
-void MainDialog::sendNetworkRequest(QUrl const & url,
-    std::function<void (brocolli::token_list_t &&)> onSuccessCallback)
-{
+void MainDialog::sendNetworkRequest(
+    QUrl const &url,
+    std::function<void(brocolli::token_list_t &&)> onSuccessCallback) {
   QNetworkRequest request(url);
   brocolli::configureRequestForSSL(request);
   m_networkManager.enableStrictTransportSecurityStore(true);
 
   auto reply = m_networkManager.get(request);
-  QObject::connect(reply, &QNetworkReply::finished, this,
-                   [this, reply, cb=std::move(onSuccessCallback)]{
-    if (reply->error() != QNetworkReply::NoError){
-      QMessageBox::critical(this, "Error", "Unable to get the list of "
-                                           "all token pairs => " +
-                            reply->errorString());
-      return;
-    }
-    auto const responseString = reply->readAll();
-    auto const jsonResponse = QJsonDocument::fromJson(responseString);
-    if (jsonResponse.isEmpty()){
-      QMessageBox::critical(this, "Error", "Unable to read the response sent");
-      return;
-    }
-    auto const list = jsonResponse.array();
-    brocolli::token_list_t tokenList;
-    tokenList.reserve(list.size());
+  QObject::connect(
+      reply, &QNetworkReply::finished, this,
+      [this, reply, cb = std::move(onSuccessCallback)] {
+        if (reply->error() != QNetworkReply::NoError) {
+          QMessageBox::critical(this, "Error",
+                                "Unable to get the list of "
+                                "all token pairs => " +
+                                    reply->errorString());
+          return;
+        }
+        auto const responseString = reply->readAll();
+        auto const jsonResponse = QJsonDocument::fromJson(responseString);
+        if (jsonResponse.isEmpty()) {
+          QMessageBox::critical(this, "Error",
+                                "Unable to read the response sent");
+          return;
+        }
+        auto const list = jsonResponse.array();
+        brocolli::token_list_t tokenList;
+        tokenList.reserve(list.size());
 
-    for (auto const & token: list) {
-      auto const tokenObject = token.toObject();
-      brocolli::token_t t;
-      t.tokenName = tokenObject.value("symbol").toString().toLower();
-      auto const jsonPrice = tokenObject.value("price");
-      if (jsonPrice.isString())
-        t.price = jsonPrice.toString().toDouble();
-      else
-        t.price = jsonPrice.toDouble();
-      t.minPrice = t.price * 0.75;
-      t.maxPrice = t.price * 1.25;
-      tokenList.push_back(std::move(t));
-    }
+        for (auto const &token : list) {
+          auto const tokenObject = token.toObject();
+          brocolli::token_t t;
+          t.tokenName = tokenObject.value("symbol").toString().toLower();
+          auto const jsonPrice = tokenObject.value("price");
+          if (jsonPrice.isString())
+            t.price = jsonPrice.toString().toDouble();
+          else
+            t.price = jsonPrice.toDouble();
+          t.minPrice = t.price * 0.75;
+          t.maxPrice = t.price * 1.25;
+          tokenList.push_back(std::move(t));
+        }
 
-    std::sort(tokenList.begin(), tokenList.end(), brocolli::token_compare_t{});
-    cb(std::move(tokenList));
-  });
+        std::sort(tokenList.begin(), tokenList.end(),
+                  brocolli::token_compare_t{});
+        cb(std::move(tokenList));
+      });
 
   QObject::connect(reply, &QNetworkReply::finished, reply,
                    &QNetworkReply::deleteLater);
 }
 
-brocolli::token_list_t::iterator
-updateData(brocolli::token_list_t& dataList, QString const &tokenName,
-           double const price) {
+brocolli::token_list_t::iterator updateData(brocolli::token_list_t &dataList,
+                                            QString const &tokenName,
+                                            double const price) {
   auto iter = brocolli::findToken(dataList, tokenName);
   if (iter != dataList.end()) {
     iter->price = price;
@@ -204,27 +233,40 @@ updateData(brocolli::token_list_t& dataList, QString const &tokenName,
 }
 
 void MainDialog::newItemAdded(QString const &tokenName,
-                              brocolli::trade_type_e const tt)
-{
+                              brocolli::trade_type_e const tt) {
   if (!m_websocket) {
     m_websocket = std::make_unique<brocolli::cwebsocket>();
     QObject::connect(m_websocket.get(),
                      &brocolli::cwebsocket::newSpotPriceReceived, this,
-                     [this](QString const &tokenName, double price)
-    {
-      auto iter = updateData(m_spotData, tokenName, price);
-      if (iter != m_spotData.end() && iter->item != nullptr)
-        iter->item->setText(QString::number(price, 'f'));
-    });
+                     [this](QString const &tokenName, double price) {
+                       auto iter = updateData(m_spotData, tokenName, price);
+                       if (iter != m_spotData.end() && iter->item != nullptr)
+                         iter->item->setText(QString::number(price, 'f'));
+                     });
 
     QObject::connect(m_websocket.get(),
                      &brocolli::cwebsocket::newFuturesPriceReceived, this,
-                     [this](QString const &tokenName, double const price)
-    {
-      auto iter = updateData(m_futuresData, tokenName, price);
-      if (iter != m_futuresData.end() && iter->item != nullptr)
-        iter->item->setText(QString::number(price, 'f'));
-    });
+                     [this](QString const &tokenName, double const price) {
+                       auto iter = updateData(m_futuresData, tokenName, price);
+                       if (iter != m_futuresData.end() && iter->item != nullptr)
+                         iter->item->setText(QString::number(price, 'f'));
+                     });
   }
   m_websocket->subscribe(tokenName, tt);
+}
+
+void MainDialog::realTimePlot() {
+  static QTime time(QTime::currentTime());
+  static double lastPointKey = 0;
+  double key = time.elapsed()/1000.0;
+
+  if(key - lastPointKey > 0.002) {
+    ui->customPlot->graph(0)->addData(key, (double)1);
+    lastPointKey = key;
+  }
+
+  /* make key axis range scroll right with the data at a constant range of 8. */
+  ui->customPlot->graph(0)->rescaleValueAxis();
+  ui->customPlot->xAxis->setRange(key, 8, Qt::AlignRight);
+  ui->customPlot->replot();
 }

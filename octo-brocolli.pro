@@ -1,4 +1,4 @@
-QT       += core gui network websockets
+QT       += core gui network websockets printsupport
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets multimedia
 
@@ -14,13 +14,15 @@ SOURCES += \
   main.cpp \
   src/cwebsocket.cpp \
   src/maindialog.cpp \
+  src/qcustomplot.cpp
 
 HEADERS += \
   include/container.hpp \
   include/cwebsocket.hpp \
   include/maindialog.hpp \
+  include/qcustomplot.h \
   include/sthread.hpp \
-  include/utils.hpp \
+  include/utils.hpp
 
 FORMS += \
     ui/maindialog.ui

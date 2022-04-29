@@ -2,10 +2,9 @@
 
 #include <QDialog>
 #include <QNetworkAccessManager>
-#include <QNetworkReply>
 #include <QListWidgetItem>
+#include <QTimer>
 #include <memory>
-#include <QSet>
 
 #include "cwebsocket.hpp"
 
@@ -54,6 +53,7 @@ private:
       std::function<void(brocolli::token_list_t &&)>);
   void newItemAdded(QString const &token, brocolli::trade_type_e const);
   void tokenRemoved(QString const &text);
+  void realTimePlot();
 
 private:
   Ui::MainDialog *ui;
@@ -62,4 +62,5 @@ private:
   brocolli::cwebsocket_ptr m_websocket = nullptr;
   brocolli::token_list_t m_spotData;
   brocolli::token_list_t m_futuresData;
+  QTimer m_timerPlot;
 };
