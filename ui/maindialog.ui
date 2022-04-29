@@ -6,14 +6,107 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>730</width>
-    <height>467</height>
+    <width>749</width>
+    <height>582</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Dialog</string>
+   <string>Plotter</string>
   </property>
-  <layout class="QGridLayout" name="gridLayout"/>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QGridLayout" name="gridLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="label">
+       <property name="text">
+        <string>Spot</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QComboBox" name="spotCombo">
+       <property name="minimumSize">
+        <size>
+         <width>150</width>
+         <height>0</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="2">
+      <widget class="QToolButton" name="spotNextButton">
+       <property name="text">
+        <string>&gt;&gt;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="4" rowspan="4">
+      <widget class="QListWidget" name="tokenListWidget"/>
+     </item>
+     <item row="0" column="5" rowspan="4">
+      <widget class="QListWidget" name="priceListWidget">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="label_2">
+       <property name="text">
+        <string>Futures</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QComboBox" name="futuresCombo">
+       <property name="minimumSize">
+        <size>
+         <width>150</width>
+         <height>0</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="2">
+      <widget class="QToolButton" name="futuresNextButton">
+       <property name="text">
+        <string>&gt;&gt;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="0">
+      <widget class="QRadioButton" name="radioButton_2">
+       <property name="text">
+        <string>Selection</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1" colspan="3">
+      <widget class="QComboBox" name="selectionCombo"/>
+     </item>
+     <item row="3" column="0">
+      <widget class="QRadioButton" name="radioButton">
+       <property name="text">
+        <string>User Input</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1" colspan="3">
+      <widget class="QLineEdit" name="userInputLine"/>
+     </item>
+     <item row="0" column="3" rowspan="2">
+      <widget class="QToolButton" name="spotPrevButton">
+       <property name="text">
+        <string>&lt;&lt;</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QTextEdit" name="textEdit"/>
+   </item>
+  </layout>
  </widget>
  <resources/>
  <connections/>
