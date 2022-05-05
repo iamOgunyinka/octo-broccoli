@@ -17,8 +17,7 @@ signals:
   void connectionLost();
   void connectionRegained();
 
-  void newSpotPriceReceived(QString const &, double const);
-  void newFuturesPriceReceived(QString const &, double const);
+  void newPriceReceived(QString const &, double const, int const);
 
 public:
   cwebsocket();

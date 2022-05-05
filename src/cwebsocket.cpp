@@ -41,7 +41,6 @@ std::optional<std::pair<QString, double>> getCoinPrice(QString const &t) {
         std::atof(jsonObject.FindMember("c")->value.GetString());
     return std::make_pair(tokenName.toLower(), amount);
   }
-  qDebug() << "Error";
   return std::nullopt;
 }
 
@@ -302,7 +301,7 @@ void cwebsocket::onSpotMessageReceived(QString const &t) {
   if (!tokenPricePair)
     return;
   auto const &[tokenName, amount] = *tokenPricePair;
-  emit newSpotPriceReceived(tokenName, amount);
+  emit newPriceReceived(tokenName, amount, (int)trade_type_e::spot);
 }
 
 void cwebsocket::onFuturesMessageReceived(QString const &t) {
@@ -310,7 +309,7 @@ void cwebsocket::onFuturesMessageReceived(QString const &t) {
   if (!tokenPricePair)
     return;
   auto const &[tokenName, amount] = *tokenPricePair;
-  emit newFuturesPriceReceived(tokenName, amount);
+  emit newPriceReceived(tokenName, amount, (int)trade_type_e::futures);
 }
 
 } // namespace brocolli

@@ -7,18 +7,23 @@
 #include <memory>
 
 #include "cwebsocket.hpp"
+#include "sthread.hpp"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainDialog; }
 QT_END_NAMESPACE
 
+class QCPGraph;
+class QCPLayoutGrid;
+
 namespace brocolli {
 struct token_t {
-  double minPrice = 0.0;
-  double maxPrice = 0.0;
-  double price = 0.0;
-  QListWidgetItem* item = nullptr;
+  double minPrice = -1.0;
+  double maxPrice = -1.0;
+  double normalizedPrice = 0.0;
   QString tokenName;
+  QListWidgetItem* item = nullptr;
+  QCPGraph* graph = nullptr;
 };
 
 struct token_compare_t {
@@ -54,13 +59,24 @@ private:
   void newItemAdded(QString const &token, brocolli::trade_type_e const);
   void tokenRemoved(QString const &text);
   void realTimePlot();
+  void startGraphPlotting();
+  void stopGraphPlotting();
+  void saveTokensToFile();
+  void readTokensFromFile();
+  void addNewItemToTokenMap(QString const &name, brocolli::trade_type_e const);
+  void attemptFileRead();
 
 private:
   Ui::MainDialog *ui;
 
   QNetworkAccessManager m_networkManager;
   brocolli::cwebsocket_ptr m_websocket = nullptr;
-  brocolli::token_list_t m_spotData;
-  brocolli::token_list_t m_futuresData;
+  std::map<QString, brocolli::token_t> m_tokens;
+  std::mutex m_mutex;
+
+  brocolli::worker_ptr m_worker = nullptr;
+  brocolli::cthread_ptr m_thread = nullptr;
+  std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
+  bool m_programIsRunning = false;
 };
