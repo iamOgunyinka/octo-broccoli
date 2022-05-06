@@ -22,9 +22,12 @@ struct token_t {
   double maxPrice = -1.0;
   double normalizedPrice = 0.0;
   QString tokenName;
+  QString legendName;
   QListWidgetItem* item = nullptr;
   QCPGraph* graph = nullptr;
 };
+
+using token_map_t = std::map<QString, brocolli::token_t>;
 
 struct token_compare_t {
   bool operator()(QString const &tokenName, token_t const & t) const {
@@ -59,19 +62,28 @@ private:
   void newItemAdded(QString const &token, brocolli::trade_type_e const);
   void tokenRemoved(QString const &text);
   void realTimePlot();
-  void startGraphPlotting();
+  void onOKButtonClicked();
   void stopGraphPlotting();
   void saveTokensToFile();
   void readTokensFromFile();
   void addNewItemToTokenMap(QString const &name, brocolli::trade_type_e const);
   void attemptFileRead();
+  void enableUIComponents(bool const);
+  void resetGraphComponents();
+  void setupGraphData();
+  void onNewPriceReceived(QString const &, double const price,
+                          int const tt);
+  int  getTimerTickMilliseconds() const;
+  double getMaxPlotsInVisibleRegion() const;
+  Qt::Alignment getLegendAlignment() const;
 
 private:
   Ui::MainDialog *ui;
 
   QNetworkAccessManager m_networkManager;
   brocolli::cwebsocket_ptr m_websocket = nullptr;
-  std::map<QString, brocolli::token_t> m_tokens;
+  brocolli::token_map_t m_tokens;
+  brocolli::token_map_t m_refs;
   std::mutex m_mutex;
 
   brocolli::worker_ptr m_worker = nullptr;
