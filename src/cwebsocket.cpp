@@ -10,37 +10,45 @@ extern QSslConfiguration getSSLConfig();
 
 std::optional<std::pair<QString, double>> getCoinPrice(QString const &t) {
   auto const text = t.toStdString();
-  rapidjson::Document d;
 
+  rapidjson::Document d;
   d.Parse(text.c_str(), text.size());
+
+  try {
+    auto const jsonObject = d.GetObject();
+    auto iter = jsonObject.FindMember("data");
+    if (iter == jsonObject.end())
+      return std::nullopt;
+    auto const dataObject = iter->value.GetObject();
+    auto const typeIter = dataObject.FindMember("e");
+    if (typeIter == dataObject.MemberEnd()) {
+      Q_ASSERT(false);
+      return std::nullopt;
+    }
+
+    std::string const type = typeIter->value.GetString();
+    bool const is24HrTicker = type.length() == 10 && type[0] == '2' &&
+        type.back() == 'r';
+    bool const isAggregateTrade = type.length() == 7 && type[0] == 'a' &&
+        type[3] == 'T' && type.back() == 'e';
+
+    if (is24HrTicker || isAggregateTrade) {
+      char const * amountStr = isAggregateTrade ? "p" : "c";
+
+      QString const tokenName = dataObject.FindMember("s")->value.GetString();
+      auto const amount =
+          std::atof(dataObject.FindMember(amountStr)->value.GetString());
+      return std::make_pair(tokenName.toLower(), amount);
+    }
+  } catch(...) {
+    return std::nullopt;
+  }
+
   if (d.HasParseError() || !d.IsObject()) {
     Q_ASSERT(false);
     return std::nullopt;
   }
 
-  auto const jsonObject = d.GetObject();
-  auto const unsubIter = jsonObject.FindMember("method");
-  auto const isUnsubscribe =
-      unsubIter != jsonObject.end() &&
-      unsubIter->value.GetString() == std::string("UNSUBSCRIBE");
-  if (jsonObject.HasMember("result") || isUnsubscribe) // return normally
-    return std::nullopt;
-
-  auto const typeIter = jsonObject.FindMember("e");
-  if (typeIter == jsonObject.MemberEnd()) {
-    Q_ASSERT(false);
-    return std::nullopt;
-  }
-
-  std::string const type = typeIter->value.GetString();
-
-  // "24hrTicker"
-  if (type.length() == 10 && type[0] == '2' && type.back() == 'r') {
-    QString const tokenName = jsonObject.FindMember("s")->value.GetString();
-    auto const amount =
-        std::atof(jsonObject.FindMember("c")->value.GetString());
-    return std::make_pair(tokenName.toLower(), amount);
-  }
   return std::nullopt;
 }
 
@@ -72,9 +80,9 @@ void cwebsocket::subscribe(QString const &tokenName, trade_type_e const tt) {
   auto& futures = m_subscribedTokens[static_cast<int>(trade_type_e::futures)];
   auto& spots = m_subscribedTokens[static_cast<int>(trade_type_e::spot)];
   if (tt == trade_type_e::spot && futures.empty()) {
-    futures.insert("btcusdt");
+    futures.insert("runeusdt");
   } else if (tt == trade_type_e::futures && spots.empty()) {
-    spots.insert("btcusdt");
+    spots.insert("runeusdt");
   }
 
   bool const workerIsActive = m_worker != nullptr && m_thread != nullptr;
@@ -102,7 +110,8 @@ void cwebsocket::unsubscribe(QString const &tokenName, trade_type_e const tt) {
     "method": "UNSUBSCRIBE",
     "params":
     [
-      "%1@ticker"
+      "%1@ticker",
+      "%1@aggTrade"
     ],
     "id": 10
   })").arg(tokenNameLower);
@@ -130,8 +139,8 @@ void cwebsocket::openConnections() {
   auto const &futuresToken =
       *m_subscribedTokens[static_cast<int>(trade_type_e::futures)].begin();
 
-  auto spotUrl_ = "wss://stream.binance.com:9443/ws/" + spotToken + "@ticker";
-  auto futuresUrl_ = "wss://fstream.binance.com/ws/" + futuresToken + "@ticker";
+  auto spotUrl_ = "wss://stream.binance.com:9443/stream?streams=" + spotToken + "@ticker/" + spotToken + "@aggTrade";
+  auto futuresUrl_ = "wss://fstream.binance.com/stream?streams=" + futuresToken + "@ticker/" + futuresToken + "@aggTrade";
   QMetaObject::invokeMethod(
       this,
       [this, spotUrl = std::move(spotUrl_),
@@ -155,6 +164,7 @@ void cwebsocket::reestablishConnections() {
 void cwebsocket::onSpotConnectionEstablished() {
   m_isStarted = true;
 
+  int i = 200;
   for (auto const &spotToken :
        m_subscribedTokens[static_cast<int>(trade_type_e::spot)]) {
     auto const spotMessage = QString(R"(
@@ -162,15 +172,17 @@ void cwebsocket::onSpotConnectionEstablished() {
       "method": "SUBSCRIBE",
       "params":
       [
-        "%1@ticker"
+        "%1@ticker",
+        "%1@aggTrade"
       ],
-      "id": 17
-    })").arg(spotToken);
+      "id": %2
+    })").arg(spotToken).arg(++i);
     m_spotWebsocket->sendTextMessage(spotMessage);
   }
 }
 
 void cwebsocket::onFuturesConnectionEstablished() {
+  int i = 20;
   for (auto const &futuresToken :
        m_subscribedTokens[static_cast<int>(trade_type_e::futures)]) {
     auto const depthMessage = QString(R"(
@@ -178,10 +190,11 @@ void cwebsocket::onFuturesConnectionEstablished() {
       "method": "SUBSCRIBE",
       "params":
       [
-        "%1@ticker"
+        "%1@ticker",
+        "%1@aggTrade"
       ],
-      "id": 20
-    })").arg(futuresToken);
+      "id": %2
+    })").arg(futuresToken).arg(++i);
     m_futuresWebsocket->sendTextMessage(depthMessage);
   }
 
@@ -269,9 +282,10 @@ void cwebsocket::sendSpotTokenSubscription(QString const &tokenName) {
       "method": "SUBSCRIBE",
       "params":
       [
-        "%1@ticker"
+        "%1@ticker",
+        "%1@aggTrade"
       ],
-      "id": 11
+      "id": 16
     })").arg(tokenName);
         m_spotWebsocket->sendTextMessage(message);
       },
@@ -287,7 +301,8 @@ void cwebsocket::sendFuturesTokenSubscription(QString const &tokenName) {
       "method": "SUBSCRIBE",
       "params":
       [
-        "%1@ticker"
+        "%1@ticker",
+        "%1@aggTrade"
       ],
       "id": 6
     })").arg(tokenName);

@@ -16,7 +16,6 @@ class cwebsocket : public QObject {
 signals:
   void connectionLost();
   void connectionRegained();
-
   void newPriceReceived(QString const &, double const, int const);
 
 public:

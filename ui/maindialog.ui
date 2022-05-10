@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>749</width>
-    <height>621</height>
+    <height>650</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -46,23 +46,67 @@
    </item>
    <item row="0" column="0" colspan="2">
     <layout class="QGridLayout" name="gridLayout">
-     <item row="0" column="4" rowspan="5">
-      <widget class="QListWidget" name="tokenListWidget"/>
-     </item>
-     <item row="1" column="1">
-      <widget class="QComboBox" name="futuresCombo">
-       <property name="minimumSize">
-        <size>
-         <width>150</width>
-         <height>0</height>
-        </size>
+     <item row="0" column="0">
+      <widget class="QLabel" name="label">
+       <property name="text">
+        <string>Spot</string>
        </property>
       </widget>
      </item>
-     <item row="1" column="2">
+     <item row="5" column="3" colspan="2">
+      <widget class="QComboBox" name="restartTickCombo"/>
+     </item>
+     <item row="0" column="5" rowspan="5">
+      <widget class="QListWidget" name="tokenListWidget"/>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="label_2">
+       <property name="text">
+        <string>Futures</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="3">
       <widget class="QToolButton" name="futuresNextButton">
        <property name="text">
         <string>&gt;&gt;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="4" rowspan="2">
+      <widget class="QToolButton" name="spotPrevButton">
+       <property name="font">
+        <font>
+         <pointsize>10</pointsize>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="text">
+        <string>&lt;&lt;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="0">
+      <widget class="QLabel" name="label_6">
+       <property name="text">
+        <string>Restart on Tick</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="0">
+      <widget class="QLabel" name="label_5">
+       <property name="text">
+        <string>Periodic Tick</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="1">
+      <widget class="QComboBox" name="timerTickCombo"/>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="label_3">
+       <property name="text">
+        <string>Show Label in</string>
        </property>
       </widget>
      </item>
@@ -76,57 +120,6 @@
        </property>
       </widget>
      </item>
-     <item row="0" column="2">
-      <widget class="QToolButton" name="spotNextButton">
-       <property name="text">
-        <string>&gt;&gt;</string>
-       </property>
-      </widget>
-     </item>
-     <item row="0" column="5" rowspan="5">
-      <widget class="QListWidget" name="priceListWidget">
-       <property name="enabled">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item row="1" column="0">
-      <widget class="QLabel" name="label_2">
-       <property name="text">
-        <string>Futures</string>
-       </property>
-      </widget>
-     </item>
-     <item row="0" column="0">
-      <widget class="QLabel" name="label">
-       <property name="text">
-        <string>Spot</string>
-       </property>
-      </widget>
-     </item>
-     <item row="0" column="3" rowspan="2">
-      <widget class="QToolButton" name="spotPrevButton">
-       <property name="font">
-        <font>
-         <pointsize>10</pointsize>
-         <bold>true</bold>
-        </font>
-       </property>
-       <property name="text">
-        <string>&lt;&lt;</string>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="0">
-      <widget class="QLabel" name="label_3">
-       <property name="text">
-        <string>Show Label in</string>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="1">
-      <widget class="QComboBox" name="legendPositionCombo"/>
-     </item>
      <item row="3" column="0">
       <widget class="QLabel" name="label_4">
        <property name="text">
@@ -134,25 +127,38 @@
        </property>
       </widget>
      </item>
-     <item row="3" column="1">
-      <widget class="QComboBox" name="selectionCombo"/>
+     <item row="2" column="1">
+      <widget class="QComboBox" name="legendPositionCombo"/>
      </item>
-     <item row="4" column="1">
-      <widget class="QComboBox" name="timerTickCombo"/>
-     </item>
-     <item row="4" column="0">
-      <widget class="QLabel" name="label_5">
-       <property name="text">
-        <string>Periodic Tick</string>
+     <item row="1" column="1">
+      <widget class="QComboBox" name="futuresCombo">
+       <property name="minimumSize">
+        <size>
+         <width>150</width>
+         <height>0</height>
+        </size>
        </property>
       </widget>
      </item>
-     <item row="2" column="2" colspan="2">
+     <item row="2" column="3" colspan="2">
       <widget class="QCheckBox" name="refCheckBox">
        <property name="text">
         <string>Use as ref</string>
        </property>
       </widget>
+     </item>
+     <item row="0" column="3">
+      <widget class="QToolButton" name="spotNextButton">
+       <property name="text">
+        <string>&gt;&gt;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="QComboBox" name="selectionCombo"/>
+     </item>
+     <item row="5" column="1">
+      <widget class="QLineEdit" name="restartTickLine"/>
      </item>
     </layout>
    </item>
@@ -166,6 +172,21 @@
    <container>1</container>
   </customwidget>
  </customwidgets>
+ <tabstops>
+  <tabstop>spotCombo</tabstop>
+  <tabstop>spotNextButton</tabstop>
+  <tabstop>futuresCombo</tabstop>
+  <tabstop>futuresNextButton</tabstop>
+  <tabstop>spotPrevButton</tabstop>
+  <tabstop>legendPositionCombo</tabstop>
+  <tabstop>refCheckBox</tabstop>
+  <tabstop>selectionCombo</tabstop>
+  <tabstop>timerTickCombo</tabstop>
+  <tabstop>restartTickLine</tabstop>
+  <tabstop>restartTickCombo</tabstop>
+  <tabstop>tokenListWidget</tabstop>
+  <tabstop>startButton</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

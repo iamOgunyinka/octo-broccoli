@@ -18,13 +18,14 @@ class QCPLayoutGrid;
 
 namespace brocolli {
 struct token_t {
-  double minPrice = -1.0;
-  double maxPrice = -1.0;
+  double minPrice = 0.0;
+  double maxPrice = 0.0;
   double normalizedPrice = 0.0;
   QString tokenName;
   QString legendName;
-  QListWidgetItem* item = nullptr;
-  QCPGraph* graph = nullptr;
+  mutable QCPGraph* graph = nullptr;
+  bool calculatingNewMinMax = true;
+  trade_type_e tradeType;
 };
 
 using token_map_t = std::map<QString, brocolli::token_t>;
@@ -37,11 +38,28 @@ struct token_compare_t {
     return t.tokenName < tokenName;
   }
   bool operator()(token_t const & a, token_t const &b) const {
-    return a.tokenName < b.tokenName;
+    return std::tie(a.tokenName, a.tradeType) <
+        std::tie(b.tokenName, b.tradeType);
   }
 };
 
+struct graph_updater_t {
+  worker_ptr worker = nullptr;
+  cthread_ptr thread = nullptr;
+};
+
+struct price_updater_t {
+  worker_ptr worker = nullptr;
+  cthread_ptr thread = nullptr;
+};
+
 using token_list_t = std::vector<token_t>;
+
+enum class ticker_reset_type_e {
+  non_ref_symbols,
+  ref_symbols,
+  both
+};
 
 }
 
@@ -49,16 +67,16 @@ class MainDialog : public QDialog
 {
   Q_OBJECT
 
+  using callback_t = std::function<void(brocolli::token_list_t &&)>;
+
 public:
   MainDialog(QWidget *parent = nullptr);
   ~MainDialog();
 
 private:
-  void getSpotsTokens();
-  void getFuturesTokens();
-  void sendNetworkRequest(
-      QUrl const &url,
-      std::function<void(brocolli::token_list_t &&)>);
+  void getSpotsTokens(callback_t = nullptr);
+  void getFuturesTokens(callback_t = nullptr);
+  void sendNetworkRequest(QUrl const &url, callback_t);
   void newItemAdded(QString const &token, brocolli::trade_type_e const);
   void tokenRemoved(QString const &text);
   void realTimePlot();
@@ -71,6 +89,8 @@ private:
   void enableUIComponents(bool const);
   void resetGraphComponents();
   void setupGraphData();
+  void resetTickerData();
+  void startWebsocket();
   void onNewPriceReceived(QString const &, double const price,
                           int const tt);
   int  getTimerTickMilliseconds() const;
@@ -86,9 +106,11 @@ private:
   brocolli::token_map_t m_refs;
   std::mutex m_mutex;
 
-  brocolli::worker_ptr m_worker = nullptr;
-  brocolli::cthread_ptr m_thread = nullptr;
+  brocolli::graph_updater_t m_graphUpdater;
+  brocolli::price_updater_t m_priceUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
+  int m_tickerResetNumber = -1;
   bool m_programIsRunning = false;
+  bool m_isResettingTickers = false;
 };

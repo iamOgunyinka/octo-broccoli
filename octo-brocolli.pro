@@ -21,8 +21,7 @@ HEADERS += \
   include/cwebsocket.hpp \
   include/maindialog.hpp \
   include/qcustomplot.h \
-  include/sthread.hpp \
-  include/utils.hpp
+  include/sthread.hpp
 
 FORMS += \
     ui/maindialog.ui
