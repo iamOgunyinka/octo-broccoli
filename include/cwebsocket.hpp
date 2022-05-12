@@ -31,7 +31,6 @@ public:
 private:
   void initializeThreadForConnection();
   void openConnections();
-
   void onSpotConnectionEstablished();
   void onFuturesConnectionEstablished();
   void reestablishConnections();
