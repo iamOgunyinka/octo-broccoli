@@ -30,7 +30,7 @@ int order_model::rowCount(const QModelIndex &parent) const
 {
   if (parent.isValid())
     return 0;
-  return m_modelData.size();
+  return (int)m_modelData.size();
 }
 
 int order_model::columnCount(const QModelIndex &parent) const

@@ -40,6 +40,7 @@ public:
   double prevNormalizedPrice = std::numeric_limits<double>::max();
   double normalizedPrice = 0.0;
   double realPrice = 0.0;
+  qint64 graphPointsDrawnCount = 0;
   std::optional<cross_over_data_t> crossOver;
   QString tokenName;
   QString legendName;
@@ -116,7 +117,7 @@ private:
   void enableUIComponents(bool const);
   void resetGraphComponents();
   void setupGraphData();
-  void resetTickerData();
+  void resetTickerData(bool const resetRefs, bool const resetSymbols);
   void startWebsocket();
   void getInitialTokenPrices();
   void onNewPriceReceived(QString const &, double const price,
@@ -155,10 +156,8 @@ private:
   korrelator::price_updater_t m_priceUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
-  double m_tickerResetNumber;
   double m_threshold = 0.0;
   bool m_programIsRunning = false;
-  bool m_isResettingTickers = false;
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;
 };

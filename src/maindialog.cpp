@@ -48,9 +48,8 @@ void token_t::reset() {
 
 static double maxVisiblePlot = 100.0;
 static QTime time(QTime::currentTime());
-static qint64 mapDrawnCount = 0;
 static double lastPoint = 0.0;
-
+static std::vector<std::optional<double>> restartTickValues{};
 } // namespace korrelator
 
 
@@ -117,9 +116,40 @@ MainDialog::MainDialog(QWidget *parent)
                                 "3 hrs", "5 hrs"});
   ui->legendPositionCombo->addItems(
       {"Top Left", "Top Right", "Bottom Left", "Bottom Right"});
-  ui->restartTickCombo->addItems({"All symbol lines", "Ref", "All lines"});
-  ui->restartTickLine->setText("2500");
   ui->umbralLine->setText("5");
+
+  QObject::connect(ui->applyButton, &QPushButton::clicked, this, [this] {
+    auto const index = ui->restartTickCombo->currentIndex();
+    auto const value = getIntegralValue(ui->restartTickLine);
+    if (isnan(value))
+      return;
+
+    if (value != maxDoubleValue) {
+      korrelator::restartTickValues[index].emplace(value);
+      if (index == 2){
+        korrelator::restartTickValues[0].emplace(value);
+        korrelator::restartTickValues[1].emplace(value);
+      }
+    }
+    ui->restartTickLine->setFocus();
+  });
+
+  korrelator::restartTickValues.clear();
+  for (int i = 0; i <= 2; ++i)
+    korrelator::restartTickValues.push_back(2'500);
+  QObject::connect(ui->restartTickCombo,
+                   static_cast<void(QComboBox::*)(int)>(
+                   &QComboBox::currentIndexChanged),
+                   this,  [this](int const index)
+  {
+    auto &optionalValue = korrelator::restartTickValues[index];
+    if (optionalValue)
+      ui->restartTickLine->setText(QString::number(optionalValue.value()));
+    else
+      ui->restartTickLine->clear();
+    ui->restartTickLine->setFocus();
+  });
+  ui->restartTickCombo->addItems({"Normal lines", "Ref line", "All lines"});
 }
 
 MainDialog::~MainDialog() {
@@ -143,6 +173,7 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->restartTickCombo->setEnabled(enabled);
   ui->restartTickLine->setEnabled(enabled);
   ui->umbralLine->setEnabled(enabled);
+  ui->applyButton->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {
@@ -606,11 +637,6 @@ void MainDialog::onOKButtonClicked() {
   if (m_programIsRunning)
     return stopGraphPlotting();
 
-  m_tickerResetNumber = getIntegralValue(ui->restartTickLine);
-  if (isnan(m_tickerResetNumber))
-    return;
-  m_isResettingTickers = m_tickerResetNumber != maxDoubleValue;
-
   m_threshold = getIntegralValue(ui->umbralLine);
   if (isnan(m_threshold))
     return;
@@ -620,7 +646,6 @@ void MainDialog::onOKButtonClicked() {
 
   m_programIsRunning = true;
   korrelator::maxVisiblePlot = getMaxPlotsInVisibleRegion();
-  korrelator::mapDrawnCount = 0;
 
   ui->startButton->setText("Stop");
   resetGraphComponents();
@@ -721,12 +746,20 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   double maxValue = -maxDoubleValue;
 
   std::lock_guard<std::mutex> lock_g{m_mutex};
+  bool isResettingSymbols = false, isResettingRefs = false;
   for (auto &value : m_tokens) {
+    ++value.graphPointsDrawnCount;
     bool isRefSymbol = value.tokenName.length() == 1;
     double price = value.normalizedPrice;
 
     if (isRefSymbol) {
       price = 0.0;
+      isResettingRefs = korrelator::restartTickValues[1].has_value() &&
+          (value.graphPointsDrawnCount >=
+          (qint64)*korrelator::restartTickValues[1]);
+      if (isResettingRefs)
+        value.graphPointsDrawnCount = 0;
+
       for (auto const &v : m_refs)
         price += v.normalizedPrice;
       price /= ((double)m_refs.size());
@@ -739,6 +772,11 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
       value.prevNormalizedPrice = price;
 
     if (!isRefSymbol) {
+      isResettingSymbols = korrelator::restartTickValues[0].has_value() &&
+          (value.graphPointsDrawnCount >=
+           (qint64)*korrelator::restartTickValues[0]);
+      if (isResettingSymbols)
+        value.graphPointsDrawnCount = 0;
       auto const crossOverDecision = lineCrossedOver(
           lastRef, currentRef, value.prevNormalizedPrice, price);
       if (crossOverDecision != trade_action_e::do_nothing) {
@@ -796,14 +834,12 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     value.prevNormalizedPrice = price;
     value.graph->setName(QString(legendDisplayFormat)
                              .arg(value.legendName)
-                             .arg(korrelator::mapDrawnCount));
+                             .arg(value.graphPointsDrawnCount));
   }
 
-  if (m_isResettingTickers &&
-      (++korrelator::mapDrawnCount == m_tickerResetNumber)) {
-    korrelator::mapDrawnCount = 0;
-    resetTickerData();
-  }
+  if (isResettingRefs || isResettingSymbols)
+    resetTickerData(isResettingRefs, isResettingSymbols);
+
   if (updatingMinMax) {
     auto const diff = (maxValue - minValue) / 19.0;
     minValue -= diff;
@@ -818,7 +854,6 @@ void MainDialog::onTimerTick() {
   bool const updatingMinMax = (key - korrelator::lastPoint) > 1.0;
   if (updatingMinMax)
     korrelator::lastPoint = key;
-  ++korrelator::mapDrawnCount;
 
   updateGraphData(key, updatingMinMax);
   // make key axis range scroll right with the data at a constant range of 100
@@ -827,25 +862,20 @@ void MainDialog::onTimerTick() {
   ui->customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
 }
 
-void MainDialog::resetTickerData() {
-  auto resetMap = [](auto &map) {
+void MainDialog::resetTickerData(const bool resetRefs, const bool resetSymbols) {
+  static auto resetMap = [](auto &map) {
     for (auto &value : map)
       value.calculatingNewMinMax = true;
   };
 
-  auto const resetType =
-      (korrelator::ticker_reset_type_e)ui->restartTickCombo->currentIndex();
-  switch (resetType) {
-  case korrelator::ticker_reset_type_e::non_ref_symbols:
-    return resetMap(m_tokens);
-  case korrelator::ticker_reset_type_e::ref_symbols:
-    return resetMap(m_refs);
-  case korrelator::ticker_reset_type_e::both:
+  if (resetRefs && resetSymbols) {
     resetMap(m_refs);
     return resetMap(m_tokens);
-  default:
-    Q_ASSERT(false);
   }
+  else if (resetRefs)
+    resetMap(m_refs);
+  else
+    resetMap(m_tokens);
 }
 
 void MainDialog::generateJsonFile(
