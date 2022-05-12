@@ -29,7 +29,7 @@ std::optional<std::pair<QString, double>> getCoinPrice(QString const &t) {
     std::string const type = typeIter->value.GetString();
     bool const is24HrTicker = type.length() == 10 && type[0] == '2' &&
         type.back() == 'r';
-    bool const isAggregateTrade = type.length() == 7 && type[0] == 'a' &&
+    bool const isAggregateTrade = type.length() == 8 && type[0] == 'a' &&
         type[3] == 'T' && type.back() == 'e';
 
     if (is24HrTicker || isAggregateTrade) {
@@ -38,6 +38,7 @@ std::optional<std::pair<QString, double>> getCoinPrice(QString const &t) {
       QString const tokenName = dataObject.FindMember("s")->value.GetString();
       auto const amount =
           std::atof(dataObject.FindMember(amountStr)->value.GetString());
+      qDebug() << tokenName << amount << type.c_str();
       return std::make_pair(tokenName.toLower(), amount);
     }
   } catch(...) {
@@ -82,8 +83,8 @@ void cwebsocket::openConnections() {
   auto const &futuresToken =
       *m_subscribedTokens[static_cast<int>(trade_type_e::futures)].begin();
 
-  auto spotUrl_ = "wss://stream.binance.com:9443/stream?streams=" + spotToken + "@ticker/" + spotToken + "@aggTrade";
-  auto futuresUrl_ = "wss://fstream.binance.com/stream?streams=" + futuresToken + "@ticker/" + futuresToken + "@aggTrade";
+  auto spotUrl_ = "wss://stream.binance.com:9443/stream?streams=" + spotToken + "@aggTrade";
+  auto futuresUrl_ = "wss://fstream.binance.com/stream?streams=" + futuresToken + "@aggTrade";
   QMetaObject::invokeMethod(
       this,
       [this, spotUrl = std::move(spotUrl_),
@@ -115,7 +116,6 @@ void cwebsocket::onSpotConnectionEstablished() {
       "method": "SUBSCRIBE",
       "params":
       [
-        "%1@ticker",
         "%1@aggTrade"
       ],
       "id": %2
@@ -133,7 +133,6 @@ void cwebsocket::onFuturesConnectionEstablished() {
       "method": "SUBSCRIBE",
       "params":
       [
-        "%1@ticker",
         "%1@aggTrade"
       ],
       "id": %2

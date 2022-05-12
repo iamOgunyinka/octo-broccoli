@@ -11,8 +11,8 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 
-#include "qcustomplot.h"
 #include "order_model.hpp"
+#include "qcustomplot.h"
 
 static char const *const futures_tokens_url =
     "https://fapi.binance.com/fapi/v1/ticker/price";
@@ -44,6 +44,8 @@ void token_t::reset() {
   maxPrice = -maxDoubleValue;
   normalizedPrice = realPrice = 0.0;
   crossedOver = false;
+  graphPointsDrawnCount = 0;
+  alpha = 1.0;
 }
 
 static double maxVisiblePlot = 100.0;
@@ -51,7 +53,6 @@ static QTime time(QTime::currentTime());
 static double lastPoint = 0.0;
 static std::vector<std::optional<double>> restartTickValues{};
 } // namespace korrelator
-
 
 MainDialog::MainDialog(QWidget *parent)
     : QDialog(parent), ui(new Ui::MainDialog) {
@@ -67,89 +68,12 @@ MainDialog::MainDialog(QWidget *parent)
   getSpotsTokens();
   getFuturesTokens();
 
-  QObject::connect(ui->spotNextButton, &QToolButton::clicked, this, [this] {
-    addNewItemToTokenMap(ui->spotCombo->currentText(),
-                         korrelator::trade_type_e::spot);
-    saveTokensToFile();
-  });
-
-  ui->umbralLine->setValidator(new QDoubleValidator);
-  QObject::connect(ui->futuresNextButton, &QToolButton::clicked, this, [this] {
-    addNewItemToTokenMap(ui->futuresCombo->currentText(),
-                         korrelator::trade_type_e::futures);
-    saveTokensToFile();
-  });
-
-  QObject::connect(ui->spotPrevButton, &QToolButton::clicked, this, [this] {
-    auto currentRow = ui->tokenListWidget->currentRow();
-    if (currentRow < 0 || currentRow >= ui->tokenListWidget->count())
-      return;
-    auto item = ui->tokenListWidget->takeItem(currentRow);
-    tokenRemoved(item->text());
-    delete item;
-    saveTokensToFile();
-  });
-
-  QObject::connect(this, &MainDialog::newOrderDetected, this,
-                   &MainDialog::generateJsonFile);
-
-  QObject::connect(ui->selectionCombo,
-                   static_cast<void(QComboBox::*)(int)>(
-                   &QComboBox::currentIndexChanged),
-                   this,  [this](int const) {
-    korrelator::maxVisiblePlot = getMaxPlotsInVisibleRegion();
-    if (!m_programIsRunning) {
-      double const key = korrelator::time.elapsed() / 1'000.0;
-      ui->customPlot->xAxis->setRange(key, korrelator::maxVisiblePlot,
-                                      Qt::AlignRight);
-      ui->customPlot->replot();
-    }
-  });
-
-  QObject::connect(ui->startButton, &QPushButton::clicked, this,
-                   [this] { onOKButtonClicked(); });
-  ui->restartTickLine->setValidator(new QIntValidator(1, 1'000'000));
-  ui->timerTickCombo->addItems(
-      {"100ms", "200ms", "500ms", "1 sec", "2 secs", "5 secs"});
-  ui->selectionCombo->addItems({"Default(100 seconds)", "1 min", "2 mins",
-                                "5 mins", "10 mins", "30 mins", "1 hr", "2 hrs",
-                                "3 hrs", "5 hrs"});
-  ui->legendPositionCombo->addItems(
-      {"Top Left", "Top Right", "Bottom Left", "Bottom Right"});
-  ui->umbralLine->setText("5");
-
-  QObject::connect(ui->applyButton, &QPushButton::clicked, this, [this] {
-    auto const index = ui->restartTickCombo->currentIndex();
-    auto const value = getIntegralValue(ui->restartTickLine);
-    if (isnan(value))
-      return;
-
-    if (value != maxDoubleValue) {
-      korrelator::restartTickValues[index].emplace(value);
-      if (index == 2){
-        korrelator::restartTickValues[0].emplace(value);
-        korrelator::restartTickValues[1].emplace(value);
-      }
-    }
-    ui->restartTickLine->setFocus();
-  });
-
-  korrelator::restartTickValues.clear();
-  for (int i = 0; i <= 2; ++i)
-    korrelator::restartTickValues.push_back(2'500);
-  QObject::connect(ui->restartTickCombo,
-                   static_cast<void(QComboBox::*)(int)>(
-                   &QComboBox::currentIndexChanged),
-                   this,  [this](int const index)
-  {
-    auto &optionalValue = korrelator::restartTickValues[index];
-    if (optionalValue)
-      ui->restartTickLine->setText(QString::number(optionalValue.value()));
-    else
-      ui->restartTickLine->clear();
-    ui->restartTickLine->setFocus();
-  });
-  ui->restartTickCombo->addItems({"Normal lines", "Ref line", "All lines"});
+  ui->restartTickCombo->addItems({"Normal lines",
+                                  "Ref line",
+                                  "All lines",
+                                  "Special"});
+  populateUIComponents();
+  connectAllUISignals();
 }
 
 MainDialog::~MainDialog() {
@@ -159,6 +83,123 @@ MainDialog::~MainDialog() {
   saveTokensToFile();
 
   delete ui;
+}
+
+void MainDialog::populateUIComponents() {
+  korrelator::restartTickValues.clear();
+  auto const totalRestartTicks = ui->restartTickCombo->count();
+  for (int i = 0; i < totalRestartTicks; ++i) {
+    if (i == totalRestartTicks - 1) {
+      korrelator::restartTickValues.push_back(maxDoubleValue);
+    }
+    korrelator::restartTickValues.push_back(2'500);
+  }
+
+  ui->restartTickLine->setValidator(new QIntValidator(1, 1'000'000));
+  ui->timerTickCombo->addItems(
+      {"100ms", "200ms", "500ms", "1 sec", "2 secs", "5 secs"});
+  ui->selectionCombo->addItems({"Default(100 seconds)", "1 min", "2 mins",
+                                "5 mins", "10 mins", "30 mins", "1 hr", "2 hrs",
+                                "3 hrs", "5 hrs"});
+  ui->legendPositionCombo->addItems(
+      {"Top Left", "Top Right", "Bottom Left", "Bottom Right"});
+  ui->umbralLine->setValidator(new QDoubleValidator);
+  ui->umbralLine->setText("5");
+}
+
+void MainDialog::onApplyButtonClicked() {
+  using korrelator::tick_line_type_e;
+
+  auto const index = ui->restartTickCombo->currentIndex();
+  auto const value = getIntegralValue(ui->restartTickLine);
+  if (isnan(value))
+    return;
+
+  if (value == maxDoubleValue)
+    return ui->restartTickLine->setFocus();
+
+  if (index == tick_line_type_e::all) {
+    korrelator::restartTickValues[tick_line_type_e::normal].emplace(value);
+    korrelator::restartTickValues[tick_line_type_e::ref].emplace(value);
+  } else if (index == tick_line_type_e::special) {
+    auto const specialValue = getIntegralValue(ui->specialLine);
+    if (isnan(specialValue))
+      return;
+    if (specialValue == maxDoubleValue)
+      korrelator::restartTickValues[tick_line_type_e::special].reset();
+    else
+      korrelator::restartTickValues[tick_line_type_e::special].emplace(value);
+    m_specialRef = specialValue;
+    return ui->specialLine->setFocus();
+  }
+  else
+    korrelator::restartTickValues[index].emplace(value);
+  ui->restartTickLine->setFocus();
+}
+
+void MainDialog::connectAllUISignals() {
+  QObject::connect(
+      ui->restartTickCombo,
+      static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+      this, [this](int const index) {
+        using korrelator::tick_line_type_e;
+        ui->specialLine->setText("");
+        ui->restartTickLine->setText("");
+
+        auto &optionalValue = korrelator::restartTickValues[index];
+        if (optionalValue) {
+          if (index == tick_line_type_e::special &&
+              *optionalValue != maxDoubleValue) {
+            ui->specialLine->setText(QString::number(m_specialRef));
+            ui->restartTickLine->setText(QString::number(*optionalValue));
+          }
+          if (index != tick_line_type_e::special)
+            ui->restartTickLine->setText(QString::number(optionalValue.value()));
+        }
+        else
+          ui->restartTickLine->clear();
+        ui->restartTickLine->setFocus();
+      });
+
+  QObject::connect(ui->applyButton, &QPushButton::clicked, this,
+                   &MainDialog::onApplyButtonClicked);
+  QObject::connect(this, &MainDialog::newOrderDetected, this,
+                   &MainDialog::generateJsonFile);
+
+  QObject::connect(
+      ui->selectionCombo,
+      static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+      this, [this](int const) {
+        korrelator::maxVisiblePlot = getMaxPlotsInVisibleRegion();
+        if (!m_programIsRunning) {
+          double const key = korrelator::time.elapsed() / 1'000.0;
+          ui->customPlot->xAxis->setRange(key, korrelator::maxVisiblePlot,
+                                          Qt::AlignRight);
+          ui->customPlot->replot();
+        }
+      });
+  QObject::connect(ui->spotNextButton, &QToolButton::clicked, this, [this] {
+    addNewItemToTokenMap(ui->spotCombo->currentText(),
+                         korrelator::trade_type_e::spot);
+    saveTokensToFile();
+  });
+  QObject::connect(ui->spotPrevButton, &QToolButton::clicked, this, [this] {
+    auto currentRow = ui->tokenListWidget->currentRow();
+    if (currentRow < 0 || currentRow >= ui->tokenListWidget->count())
+      return;
+    auto item = ui->tokenListWidget->takeItem(currentRow);
+    tokenRemoved(item->text());
+    delete item;
+    saveTokensToFile();
+  });
+  QObject::connect(ui->startButton, &QPushButton::clicked, this,
+                   [this] { onOKButtonClicked(); });
+
+  QObject::connect(ui->futuresNextButton, &QToolButton::clicked, this, [this] {
+    addNewItemToTokenMap(ui->futuresCombo->currentText(),
+                         korrelator::trade_type_e::futures);
+    saveTokensToFile();
+  });
 }
 
 void MainDialog::enableUIComponents(bool const enabled) {
@@ -174,6 +215,8 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->restartTickLine->setEnabled(enabled);
   ui->umbralLine->setEnabled(enabled);
   ui->applyButton->setEnabled(enabled);
+  ui->specialLine->setEnabled(enabled);
+  ui->specialLine->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {
@@ -291,8 +334,9 @@ void MainDialog::onNewPriceReceived(QString const &tokenName,
 void MainDialog::newItemAdded(QString const &tokenName,
                               korrelator::trade_type_e const tt) {
   bool const isRef = ui->refCheckBox->isChecked();
+  bool const hasRefStored = find(m_tokens, "*") != m_tokens.end();
   if (isRef) {
-    if (find(m_tokens, "*") == m_tokens.end()) {
+    if (!hasRefStored) {
       korrelator::token_t token;
       token.tokenName = "*";
       token.calculatingNewMinMax = true;
@@ -457,8 +501,8 @@ void MainDialog::sendNetworkRequest(
       [this, reply, cb = std::move(onSuccessCallback)] {
         if (reply->error() != QNetworkReply::NoError) {
           QMessageBox::critical(this, "Error",
-                                "Unable to get the list of "
-                                "all token pairs => " +
+                                "Unable to get the list of all token pairs"
+                                "=> " +
                                     reply->errorString());
           return;
         }
@@ -579,7 +623,7 @@ void MainDialog::setupGraphData() {
 void MainDialog::getInitialTokenPrices() {
   auto normalizePrice = [](auto &list, auto const &result, auto const tt) {
     for (auto listIter = list.begin(); listIter != list.end(); ++listIter) {
-      auto& value = *listIter;
+      auto &value = *listIter;
       if (value.tradeType != tt || value.tokenName.size() == 1)
         continue;
       auto iter =
@@ -633,16 +677,38 @@ double MainDialog::getIntegralValue(QLineEdit *lineEdit) {
   return maxDoubleValue;
 }
 
+bool MainDialog::validateUserInput() {
+  m_threshold = getIntegralValue(ui->umbralLine);
+  if (isnan(m_threshold))
+    return false;
+  m_findingUmbral = m_threshold != maxDoubleValue;
+  if (m_findingUmbral)
+    m_threshold /= 100.0;
+
+  auto &specialValue = korrelator::restartTickValues[3];
+  m_findingSpecialRef = specialValue.has_value();
+  if (m_findingSpecialRef)
+    m_specialRef /= 100.0;
+  return true;
+}
+
+void MainDialog::setupOrderTableModel() {
+  m_model = std::make_unique<korrelator::order_model>();
+  ui->tableView->setModel(m_model.get());
+  auto header = ui->tableView->horizontalHeader();
+  header->setSectionResizeMode(QHeaderView::Stretch);
+  ui->tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
+  header->setMaximumSectionSize(200);
+  ui->tableView->setWordWrap(true);
+  ui->tableView->resizeRowsToContents();
+}
+
 void MainDialog::onOKButtonClicked() {
   if (m_programIsRunning)
     return stopGraphPlotting();
 
-  m_threshold = getIntegralValue(ui->umbralLine);
-  if (isnan(m_threshold))
+  if (!validateUserInput())
     return;
-  m_findingUmbral = m_threshold != maxDoubleValue;
-  if (m_findingUmbral)
-    m_threshold /= 100.0;
 
   m_programIsRunning = true;
   korrelator::maxVisiblePlot = getMaxPlotsInVisibleRegion();
@@ -661,14 +727,8 @@ void MainDialog::onOKButtonClicked() {
     m_refIterator = m_tokens.begin();
     m_hasReferences = true;
   }
-  m_model = std::make_unique<korrelator::order_model>();
-  ui->tableView->setModel(m_model.get());
-  auto header = ui->tableView->horizontalHeader();
-  header->setSectionResizeMode(QHeaderView::Stretch);
-  ui->tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
-  header->setMaximumSectionSize(200);
-  ui->tableView->setWordWrap(true);
-  ui->tableView->resizeRowsToContents();
+
+  setupOrderTableModel();
   getInitialTokenPrices();
 }
 
@@ -732,6 +792,7 @@ korrelator::trade_action_e MainDialog::lineCrossedOver(double const prevA,
 
 void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   using korrelator::trade_action_e;
+  using korrelator::tick_line_type_e;
 
   static char const *const legendDisplayFormat = "%1(%2)";
 
@@ -747,44 +808,56 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
 
   std::lock_guard<std::mutex> lock_g{m_mutex};
   bool isResettingSymbols = false, isResettingRefs = false;
-  for (auto &value : m_tokens) {
+  bool eachTickNormalize = false;
+
+  for (auto &value : m_tokens)
+  {
     ++value.graphPointsDrawnCount;
-    bool isRefSymbol = value.tokenName.length() == 1;
-    double price = value.normalizedPrice;
+    bool const isRefSymbol = value.tokenName.length() == 1;
+    double& price = value.normalizedPrice;
 
     if (isRefSymbol) {
       price = 0.0;
-      isResettingRefs = korrelator::restartTickValues[1].has_value() &&
-          (value.graphPointsDrawnCount >=
-          (qint64)*korrelator::restartTickValues[1]);
-      if (isResettingRefs)
+      if (!m_findingSpecialRef) {
+        auto const & refTickValue =
+            korrelator::restartTickValues[tick_line_type_e::ref];
+        isResettingRefs = refTickValue.has_value() &&
+            (value.graphPointsDrawnCount >= (qint64)*refTickValue);
+      } else {
+        auto const & refTickValue =
+            korrelator::restartTickValues[tick_line_type_e::special];
+        eachTickNormalize = value.graphPointsDrawnCount >= *refTickValue;
+      }
+      if (isResettingRefs || eachTickNormalize)
         value.graphPointsDrawnCount = 0;
 
       for (auto const &v : m_refs)
         price += v.normalizedPrice;
-      price /= ((double)m_refs.size());
-      m_refIterator->normalizedPrice = currentRef = price;
-    }
 
-    value.graph->addData(key, price);
+      price /= ((double)m_refs.size());
+      m_refIterator->normalizedPrice = currentRef = price * m_refIterator->alpha;
+    }
 
     if (value.prevNormalizedPrice == maxDoubleValue)
       value.prevNormalizedPrice = price;
 
     if (!isRefSymbol) {
-      isResettingSymbols = korrelator::restartTickValues[0].has_value() &&
-          (value.graphPointsDrawnCount >=
-           (qint64)*korrelator::restartTickValues[0]);
-      if (isResettingSymbols)
+      isResettingSymbols = !m_findingSpecialRef &&
+          korrelator::restartTickValues[0].has_value() &&
+                           (value.graphPointsDrawnCount >=
+                            (qint64)*korrelator::restartTickValues[0]);
+      if (isResettingSymbols) {
         value.graphPointsDrawnCount = 0;
+      }
+
       auto const crossOverDecision = lineCrossedOver(
           lastRef, currentRef, value.prevNormalizedPrice, price);
       if (crossOverDecision != trade_action_e::do_nothing) {
         auto &crossOver = value.crossOver.emplace();
         crossOver.price = value.realPrice;
         crossOver.action = crossOverDecision;
-        crossOver.time = QDateTime::currentDateTime()
-            .toString("yyyy-MM-dd hh:mm:ss");
+        crossOver.time =
+            QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
         value.crossedOver = true;
       }
 
@@ -792,19 +865,20 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
         double amp = 0.0;
         auto &crossOverValue = *value.crossOver;
         if (crossOverValue.action == trade_action_e::buy)
-          amp = price/currentRef - 1.0;
+          amp = (price / currentRef) - 1.0;
         else
-          amp = currentRef/price - 1.0;
-        if (amp >= m_threshold) {
+          amp = (currentRef / price) - 1.0;
+        if (m_findingUmbral && amp >= m_threshold) {
           korrelator::model_data_t data;
-          data.marketType = (value.tradeType == korrelator::trade_type_e::spot ?
-                               "SPOT": "FUTURES");
+          data.marketType =
+              (value.tradeType == korrelator::trade_type_e::spot ? "SPOT"
+                                                                 : "FUTURES");
           data.signalPrice = crossOverValue.price;
           data.openPrice = value.realPrice;
           data.side = actionTypeToString(value.crossOver->action);
           data.symbol = value.tokenName;
-          data.openTime = QDateTime::currentDateTime()
-              .toString("yyyy-MM-dd hh:mm:ss");
+          data.openTime =
+              QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
           data.signalTime = crossOverValue.time;
 
           emit newOrderDetected(crossOverValue, data);
@@ -816,15 +890,28 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
       }
     }
 
+    if (eachTickNormalize && !isRefSymbol) {
+      currentRef /= m_refIterator->alpha;
+      auto const distanceFromRefToSymbol = // a
+          ((price > currentRef) ? (price / currentRef) :
+                                  (currentRef / price )) - 1.0;
+      auto const distanceThreshold = m_specialRef; // b
+      if (price > currentRef) {
+        m_refIterator->alpha = (
+              (distanceFromRefToSymbol + 1) / (distanceThreshold + 1.0));
+      } else {
+        m_refIterator->alpha = (
+              (distanceThreshold + 1) / (distanceFromRefToSymbol + 1.0));
+      }
+    }
+
     if (updatingMinMax) {
       bool foundInRange = false;
       auto const visibleValueRange =
           value.graph->getValueRange(foundInRange, QCP::sdBoth, range);
       if (foundInRange) {
-        minValue =
-            std::min(std::min(minValue, visibleValueRange.lower), price);
-        maxValue =
-            std::max(std::max(maxValue, visibleValueRange.upper), price);
+        minValue = std::min(std::min(minValue, visibleValueRange.lower), price);
+        maxValue = std::max(std::max(maxValue, visibleValueRange.upper), price);
       } else {
         minValue = std::min(minValue, price);
         maxValue = std::max(maxValue, price);
@@ -835,7 +922,8 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     value.graph->setName(QString(legendDisplayFormat)
                              .arg(value.legendName)
                              .arg(value.graphPointsDrawnCount));
-  }
+    value.graph->addData(key, price);
+  } // end for
 
   if (isResettingRefs || isResettingSymbols)
     resetTickerData(isResettingRefs, isResettingSymbols);
@@ -856,13 +944,15 @@ void MainDialog::onTimerTick() {
     korrelator::lastPoint = key;
 
   updateGraphData(key, updatingMinMax);
+
   // make key axis range scroll right with the data at a constant range of 100
   ui->customPlot->xAxis->setRange(key, korrelator::maxVisiblePlot,
                                   Qt::AlignRight);
   ui->customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
 }
 
-void MainDialog::resetTickerData(const bool resetRefs, const bool resetSymbols) {
+void MainDialog::resetTickerData(const bool resetRefs,
+                                 const bool resetSymbols) {
   static auto resetMap = [](auto &map) {
     for (auto &value : map)
       value.calculatingNewMinMax = true;
@@ -871,23 +961,21 @@ void MainDialog::resetTickerData(const bool resetRefs, const bool resetSymbols) 
   if (resetRefs && resetSymbols) {
     resetMap(m_refs);
     return resetMap(m_tokens);
-  }
-  else if (resetRefs)
+  } else if (resetRefs)
     resetMap(m_refs);
   else
     resetMap(m_tokens);
 }
 
-void MainDialog::generateJsonFile(
-    korrelator::cross_over_data_t const &,
-    korrelator::model_data_t const &modelData)
-{
-  static auto const path = QDir::currentPath() + "/correlator/"
-      + QDateTime::currentDateTime().toString("yyyy_MM_dd_hh_mm_ss") + "/";
+void MainDialog::generateJsonFile(korrelator::cross_over_data_t const &,
+                                  korrelator::model_data_t const &modelData) {
+  static auto const path =
+      QDir::currentPath() + "/correlator/" +
+      QDateTime::currentDateTime().toString("yyyy_MM_dd_hh_mm_ss") + "/";
   if (auto dir = QDir(path); !dir.exists())
     dir.mkpath(path);
-  auto const filename = path + QTime::currentTime().toString("hh_mm_ss")
-      + ".json";
+  auto const filename =
+      path + QTime::currentTime().toString("hh_mm_ss") + ".json";
   if (QFileInfo::exists(filename))
     QFile::remove(filename);
 

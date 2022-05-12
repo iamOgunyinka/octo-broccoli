@@ -21,8 +21,12 @@ class QCPLayoutGrid;
 
 namespace korrelator {
 
-enum trade_action_e {
+enum class trade_action_e {
   buy, sell, do_nothing
+};
+
+enum tick_line_type_e {
+  normal, ref, all, special
 };
 
 struct cross_over_data_t {
@@ -40,6 +44,7 @@ public:
   double prevNormalizedPrice = std::numeric_limits<double>::max();
   double normalizedPrice = 0.0;
   double realPrice = 0.0;
+  double alpha = 1.0;
   qint64 graphPointsDrawnCount = 0;
   std::optional<cross_over_data_t> crossOver;
   QString tokenName;
@@ -120,14 +125,20 @@ private:
   void resetTickerData(bool const resetRefs, bool const resetSymbols);
   void startWebsocket();
   void getInitialTokenPrices();
+  void populateUIComponents();
+  void connectAllUISignals();
+  bool validateUserInput();
   void onNewPriceReceived(QString const &, double const price,
                           korrelator::trade_type_e const tt);
   void generateJsonFile(korrelator::cross_over_data_t const &,
                         korrelator::model_data_t const &);
+  void onApplyButtonClicked();
   int  getTimerTickMilliseconds() const;
   double getIntegralValue(QLineEdit* lineEdit);
   double getMaxPlotsInVisibleRegion() const;
   void updateGraphData(double const key, bool const);
+  void setupOrderTableModel();
+
   Qt::Alignment getLegendAlignment() const;
   list_iterator find(korrelator::token_list_t& container, QString const &,
                      korrelator::trade_type_e const);
@@ -157,6 +168,8 @@ private:
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
   double m_threshold = 0.0;
+  double m_specialRef = std::numeric_limits<double>::max();
+  bool m_findingSpecialRef = false;
   bool m_programIsRunning = false;
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;
