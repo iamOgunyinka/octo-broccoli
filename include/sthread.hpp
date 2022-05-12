@@ -3,7 +3,7 @@
 #include <QThread>
 #include <memory>
 
-namespace brocolli {
+namespace korrelator {
 class Worker : public QObject {
   Q_OBJECT
 public:

@@ -6,7 +6,7 @@
 
 class QWebSocket;
 
-namespace brocolli {
+namespace korrelator {
 
 enum class trade_type_e { spot, futures };
 
@@ -22,11 +22,11 @@ public:
   cwebsocket();
   ~cwebsocket();
 
-  void subscribe(QString const &token, trade_type_e const tt);
-  void unsubscribe(QString const &token, trade_type_e const tt);
-  bool empty() const {
-    return m_subscribedTokens[0].empty() && m_subscribedTokens[1].empty();
+  void addSubscription(QString const &token, trade_type_e const tt) {
+    m_subscribedTokens[static_cast<int>(tt)].insert(token.toLower());
   }
+  void unsubscribe(QString const &token, trade_type_e const tt);
+  void startWatch();
 
 private:
   void initializeThreadForConnection();
@@ -39,9 +39,6 @@ private:
   void reset();
   void onFuturesMessageReceived(QString const &t);
   void onSpotMessageReceived(QString const &t);
-  void sendSpotTokenSubscription(QString const &);
-  void sendFuturesTokenSubscription(QString const &token);
-  void removeDuds();
 
 private:
   cthread_ptr m_thread = nullptr;
@@ -52,10 +49,8 @@ private:
   bool m_isStarted = false;
   bool m_stopRequested = false;
   bool m_connectionRegained = false;
-  bool m_dudIsActiveInSpot = false;
-  bool m_dudIsActiveInFutures = false;
 };
 
 using cwebsocket_ptr = std::unique_ptr<cwebsocket>;
 
-} // namespace brocolli
+} // namespace korrelator

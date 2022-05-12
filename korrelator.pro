@@ -1,6 +1,6 @@
 QT       += core gui network websockets printsupport
 
-greaterThan(QT_MAJOR_VERSION, 4): QT += widgets multimedia
+greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 CONFIG += c++17
 INCLUDEPATH += "include"
@@ -14,12 +14,14 @@ SOURCES += \
   main.cpp \
   src/cwebsocket.cpp \
   src/maindialog.cpp \
+  src/order_model.cpp \
   src/qcustomplot.cpp
 
 HEADERS += \
   include/container.hpp \
   include/cwebsocket.hpp \
   include/maindialog.hpp \
+  include/order_model.hpp \
   include/qcustomplot.h \
   include/sthread.hpp
 

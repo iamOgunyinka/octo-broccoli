@@ -4,7 +4,7 @@
 #include <optional>
 #include <rapidjson/document.h>
 
-namespace brocolli {
+namespace korrelator {
 
 extern QSslConfiguration getSSLConfig();
 
@@ -59,72 +59,15 @@ cwebsocket::~cwebsocket() {
   reset();
 }
 
-void cwebsocket::removeDuds() {
-  if (m_dudIsActiveInFutures) {
-    m_dudIsActiveInFutures = false;
-    unsubscribe("btcusdt", trade_type_e::futures);
-  }
-  if (m_dudIsActiveInSpot) {
-    m_dudIsActiveInSpot = false;
-    unsubscribe("btcusdt", trade_type_e::spot);
-  }
-}
-
-void cwebsocket::subscribe(QString const &tokenName, trade_type_e const tt) {
-  auto const [iter, successful] =
-      m_subscribedTokens[static_cast<int>(tt)].insert(tokenName.toLower());
-
-  if (!successful)
-    return;
-
+void cwebsocket::startWatch() {
   auto& futures = m_subscribedTokens[static_cast<int>(trade_type_e::futures)];
   auto& spots = m_subscribedTokens[static_cast<int>(trade_type_e::spot)];
-  if (tt == trade_type_e::spot && futures.empty()) {
+  if (futures.empty())
     futures.insert("runeusdt");
-  } else if (tt == trade_type_e::futures && spots.empty()) {
+  if (spots.empty())
     spots.insert("runeusdt");
-  }
 
-  bool const workerIsActive = m_worker != nullptr && m_thread != nullptr;
-  if (!workerIsActive)
-    return initializeThreadForConnection();
-  else if (tt == trade_type_e::spot)
-    sendSpotTokenSubscription(*iter);
-  else if (tt == trade_type_e::futures)
-    sendFuturesTokenSubscription(*iter);
-}
-
-void cwebsocket::unsubscribe(QString const &tokenName, trade_type_e const tt) {
-  auto &container = m_subscribedTokens[static_cast<int>(tt)];
-  auto const &tokenNameLower = tokenName.toLower();
-  auto const iter = container.find(tokenNameLower);
-  if (iter == container.end() || m_thread == nullptr)
-    return;
-
-  container.erase(iter);
-  if (container.empty())
-    return;
-
-  auto const unsubscribeMessage = QString(R"(
-  {
-    "method": "UNSUBSCRIBE",
-    "params":
-    [
-      "%1@ticker",
-      "%1@aggTrade"
-    ],
-    "id": 10
-  })").arg(tokenNameLower);
-
-  QMetaObject::invokeMethod(
-      this,
-      [this, unsubscribeMessage, tt] {
-        if (tt == trade_type_e::spot)
-          m_spotWebsocket->sendTextMessage(unsubscribeMessage);
-        else
-          m_futuresWebsocket->sendTextMessage(unsubscribeMessage);
-      },
-      Qt::AutoConnection);
+  initializeThreadForConnection();
 }
 
 void cwebsocket::openConnections() {
@@ -273,44 +216,6 @@ void cwebsocket::reset() {
   m_isStarted = false;
 }
 
-void cwebsocket::sendSpotTokenSubscription(QString const &tokenName) {
-  QMetaObject::invokeMethod(
-      this,
-      [this, tokenName] {
-        auto const message = QString(R"(
-    {
-      "method": "SUBSCRIBE",
-      "params":
-      [
-        "%1@ticker",
-        "%1@aggTrade"
-      ],
-      "id": 16
-    })").arg(tokenName);
-        m_spotWebsocket->sendTextMessage(message);
-      },
-      Qt::AutoConnection);
-}
-
-void cwebsocket::sendFuturesTokenSubscription(QString const &tokenName) {
-  QMetaObject::invokeMethod(
-      this,
-      [this, tokenName] {
-        auto const message = QString(R"(
-    {
-      "method": "SUBSCRIBE",
-      "params":
-      [
-        "%1@ticker",
-        "%1@aggTrade"
-      ],
-      "id": 6
-    })").arg(tokenName);
-        m_futuresWebsocket->sendTextMessage(message);
-      },
-      Qt::AutoConnection);
-}
-
 void cwebsocket::onSpotMessageReceived(QString const &t) {
   auto const tokenPricePair = getCoinPrice(t);
   if (!tokenPricePair)
@@ -327,4 +232,4 @@ void cwebsocket::onFuturesMessageReceived(QString const &t) {
   emit newPriceReceived(tokenName, amount, (int)trade_type_e::futures);
 }
 
-} // namespace brocolli
+} // namespace korrelator
