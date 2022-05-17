@@ -233,6 +233,7 @@ void MainDialog::stopGraphPlotting() {
 
   m_programIsRunning = false;
   enableUIComponents(true);
+  m_websocket.reset();
 }
 
 int MainDialog::getTimerTickMilliseconds() const {
@@ -686,7 +687,8 @@ bool MainDialog::validateUserInput() {
     m_threshold /= 100.0;
 
   auto &specialValue = korrelator::restartTickValues[3];
-  m_findingSpecialRef = specialValue.has_value();
+  m_findingSpecialRef = specialValue.has_value() &&
+      specialValue.value() != maxDoubleValue;
   if (m_findingSpecialRef)
     m_specialRef /= 100.0;
   return true;
@@ -735,13 +737,13 @@ void MainDialog::onOKButtonClicked() {
 void MainDialog::startWebsocket() {
   // price updater
   m_priceUpdater.worker = std::make_unique<korrelator::Worker>([this] {
-    m_websocket = std::make_unique<korrelator::cwebsocket>();
-    QObject::connect(
-        m_websocket.get(), &korrelator::cwebsocket::newPriceReceived,
-        m_priceUpdater.worker.get(),
-        [this](QString const &tokenName, double price, int const t) {
-          onNewPriceReceived(tokenName, price, (korrelator::trade_type_e)t);
-        });
+    m_websocket = std::make_unique<korrelator::cwebsocket>(
+          [this](QString const &tokenName, double price,
+          korrelator::trade_type_e const t) {
+        // qDebug() << QThread::currentThreadId()
+        //         << tokenName << price << (int)t;
+        onNewPriceReceived(tokenName, price, t);
+    });
     for (auto const &ref : m_refs)
       m_websocket->addSubscription(ref.tokenName, ref.tradeType);
 
@@ -790,6 +792,72 @@ korrelator::trade_action_e MainDialog::lineCrossedOver(double const prevA,
   return korrelator::trade_action_e::do_nothing;
 }
 
+
+void calculateGraphMinMax(
+    korrelator::token_t &value, QCPRange const &range,
+    double& minValue, double& maxValue) {
+  bool foundInRange = false;
+  auto const visibleValueRange =
+      value.graph->getValueRange(foundInRange, QCP::sdBoth, range);
+  if (foundInRange) {
+    minValue = std::min(
+          std::min(minValue, visibleValueRange.lower),
+          value.normalizedPrice);
+    maxValue = std::max(
+          std::max(maxValue, visibleValueRange.upper),
+          value.normalizedPrice);
+  } else {
+    minValue = std::min(minValue, value.normalizedPrice);
+    maxValue = std::max(maxValue, value.normalizedPrice);
+  }
+}
+
+korrelator::ref_calculation_data_t MainDialog::updateRefGraph(
+    double const keyStart, double const keyEnd,
+    bool const updatingMinMax)
+{
+  using korrelator::tick_line_type_e;
+
+  korrelator::ref_calculation_data_t refResult;
+
+  auto& value = m_tokens[0];
+  ++value.graphPointsDrawnCount;
+
+  if (!m_findingSpecialRef) {
+    auto const & refTickValue =
+        korrelator::restartTickValues[tick_line_type_e::ref];
+    refResult.isResettingRef = refTickValue.has_value() &&
+        (value.graphPointsDrawnCount >= (qint64)*refTickValue);
+  } else {
+    auto const & refTickValue =
+        korrelator::restartTickValues[tick_line_type_e::special];
+    refResult.eachTickNormalize = value.graphPointsDrawnCount >= *refTickValue;
+  }
+
+  if (refResult.isResettingRef || refResult.eachTickNormalize)
+    value.graphPointsDrawnCount = 0;
+
+  // get the normalizedValue
+  value.normalizedPrice = 0.0;
+  for (auto const &v : m_refs)
+    value.normalizedPrice += v.normalizedPrice;
+
+  value.normalizedPrice /= ((double)m_refs.size());
+  m_refIterator->normalizedPrice = value.normalizedPrice * m_refIterator->alpha;
+
+  if (updatingMinMax) {
+    QCPRange const range(keyStart, keyEnd);
+    calculateGraphMinMax(value, range, refResult.minValue, refResult.maxValue);
+  }
+
+  value.prevNormalizedPrice = value.prevNormalizedPrice;
+  value.graph->setName(QString("%1(%2)")
+                           .arg(value.legendName)
+                           .arg(value.graphPointsDrawnCount));
+  value.graph->addData(keyEnd, value.normalizedPrice);
+  return refResult;
+}
+
 void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   using korrelator::trade_action_e;
   using korrelator::tick_line_type_e;
@@ -799,104 +867,83 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   double const keyStart =
       (key >= korrelator::maxVisiblePlot ? (key - korrelator::maxVisiblePlot)
                                          : 0.0);
-  QCPRange const range(keyStart, key);
-  double const lastRef =
+  double const prevRef =
       (m_hasReferences) ? m_refIterator->normalizedPrice : maxDoubleValue;
-  double currentRef = maxDoubleValue;
-  double minValue = maxDoubleValue;
-  double maxValue = -maxDoubleValue;
 
   std::lock_guard<std::mutex> lock_g{m_mutex};
-  bool isResettingSymbols = false, isResettingRefs = false;
-  bool eachTickNormalize = false;
+  bool isResettingSymbols = false;
 
-  for (auto &value : m_tokens)
-  {
+  // update ref symbol data on the graph
+  auto refResult = (!m_hasReferences) ? korrelator::ref_calculation_data_t():
+      updateRefGraph(keyStart, key, updatingMinMax);
+  double currentRef = m_refIterator->normalizedPrice;
+
+  // update the real symbols
+  for (int i = 1; i < m_tokens.size(); ++i) {
+    auto& value = m_tokens[i];
+
     ++value.graphPointsDrawnCount;
-    bool const isRefSymbol = value.tokenName.length() == 1;
-    double& price = value.normalizedPrice;
-
-    if (isRefSymbol) {
-      price = 0.0;
-      if (!m_findingSpecialRef) {
-        auto const & refTickValue =
-            korrelator::restartTickValues[tick_line_type_e::ref];
-        isResettingRefs = refTickValue.has_value() &&
-            (value.graphPointsDrawnCount >= (qint64)*refTickValue);
-      } else {
-        auto const & refTickValue =
-            korrelator::restartTickValues[tick_line_type_e::special];
-        eachTickNormalize = value.graphPointsDrawnCount >= *refTickValue;
-      }
-      if (isResettingRefs || eachTickNormalize)
-        value.graphPointsDrawnCount = 0;
-
-      for (auto const &v : m_refs)
-        price += v.normalizedPrice;
-
-      price /= ((double)m_refs.size());
-      m_refIterator->normalizedPrice = currentRef = price * m_refIterator->alpha;
-    }
-
     if (value.prevNormalizedPrice == maxDoubleValue)
-      value.prevNormalizedPrice = price;
+      value.prevNormalizedPrice = value.normalizedPrice;
 
-    if (!isRefSymbol) {
-      isResettingSymbols = !m_findingSpecialRef &&
-          korrelator::restartTickValues[0].has_value() &&
-                           (value.graphPointsDrawnCount >=
-                            (qint64)*korrelator::restartTickValues[0]);
-      if (isResettingSymbols) {
-        value.graphPointsDrawnCount = 0;
-      }
+    isResettingSymbols = !m_findingSpecialRef &&
+        korrelator::restartTickValues[0].has_value() &&
+        (value.graphPointsDrawnCount >=
+         (qint64)*korrelator::restartTickValues[tick_line_type_e::normal]);
 
-      auto const crossOverDecision = lineCrossedOver(
-          lastRef, currentRef, value.prevNormalizedPrice, price);
-      if (crossOverDecision != trade_action_e::do_nothing) {
-        auto &crossOver = value.crossOver.emplace();
-        crossOver.price = value.realPrice;
-        crossOver.action = crossOverDecision;
-        crossOver.time =
+    if (isResettingSymbols)
+      value.graphPointsDrawnCount = 0;
+
+    auto const crossOverDecision = lineCrossedOver(
+          prevRef, currentRef, value.prevNormalizedPrice,
+          value.normalizedPrice);
+
+    if (crossOverDecision != trade_action_e::do_nothing) {
+      auto &crossOver = value.crossOver.emplace();
+      crossOver.price = value.realPrice;
+      crossOver.action = crossOverDecision;
+      crossOver.time =
+          QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+      value.crossedOver = true;
+    }
+
+    if (value.crossedOver) {
+      double amp = 0.0;
+      auto &crossOverValue = *value.crossOver;
+      if (crossOverValue.action == trade_action_e::buy)
+        amp = (value.normalizedPrice / currentRef) - 1.0;
+      else
+        amp = (currentRef / value.normalizedPrice) - 1.0;
+
+      if (m_findingUmbral && amp >= m_threshold) {
+        korrelator::model_data_t data;
+        data.marketType =
+            (value.tradeType == korrelator::trade_type_e::spot ? "SPOT"
+                                                               : "FUTURES");
+        data.signalPrice = crossOverValue.price;
+        data.openPrice = value.realPrice;
+        data.side = actionTypeToString(value.crossOver->action);
+        data.symbol = value.tokenName;
+        data.openTime =
             QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-        value.crossedOver = true;
-      }
+        data.signalTime = crossOverValue.time;
 
-      if (value.crossedOver) {
-        double amp = 0.0;
-        auto &crossOverValue = *value.crossOver;
-        if (crossOverValue.action == trade_action_e::buy)
-          amp = (price / currentRef) - 1.0;
-        else
-          amp = (currentRef / price) - 1.0;
-        if (m_findingUmbral && amp >= m_threshold) {
-          korrelator::model_data_t data;
-          data.marketType =
-              (value.tradeType == korrelator::trade_type_e::spot ? "SPOT"
-                                                                 : "FUTURES");
-          data.signalPrice = crossOverValue.price;
-          data.openPrice = value.realPrice;
-          data.side = actionTypeToString(value.crossOver->action);
-          data.symbol = value.tokenName;
-          data.openTime =
-              QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-          data.signalTime = crossOverValue.time;
+        emit newOrderDetected(crossOverValue, data);
+        m_model->AddData(std::move(data));
 
-          emit newOrderDetected(crossOverValue, data);
-          m_model->AddData(std::move(data));
-
-          value.crossedOver = false;
-          value.crossOver.reset();
-        }
+        value.crossedOver = false;
+        value.crossOver.reset();
       }
     }
 
-    if (eachTickNormalize && !isRefSymbol) {
+    if (refResult.eachTickNormalize) {
       currentRef /= m_refIterator->alpha;
       auto const distanceFromRefToSymbol = // a
-          ((price > currentRef) ? (price / currentRef) :
-                                  (currentRef / price )) - 1.0;
+          ((value.normalizedPrice > currentRef) ?
+             (value.normalizedPrice / currentRef) :
+             (currentRef / value.normalizedPrice)) - 1.0;
       auto const distanceThreshold = m_specialRef; // b
-      if (price > currentRef) {
+      if (value.normalizedPrice > currentRef) {
         m_refIterator->alpha = (
               (distanceFromRefToSymbol + 1) / (distanceThreshold + 1.0));
       } else {
@@ -906,33 +953,26 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     }
 
     if (updatingMinMax) {
-      bool foundInRange = false;
-      auto const visibleValueRange =
-          value.graph->getValueRange(foundInRange, QCP::sdBoth, range);
-      if (foundInRange) {
-        minValue = std::min(std::min(minValue, visibleValueRange.lower), price);
-        maxValue = std::max(std::max(maxValue, visibleValueRange.upper), price);
-      } else {
-        minValue = std::min(minValue, price);
-        maxValue = std::max(maxValue, price);
-      }
+      QCPRange const range(keyStart, key);
+      calculateGraphMinMax(value, range, refResult.minValue,
+                           refResult.maxValue);
     }
 
-    value.prevNormalizedPrice = price;
+    value.prevNormalizedPrice = value.normalizedPrice;
     value.graph->setName(QString(legendDisplayFormat)
                              .arg(value.legendName)
                              .arg(value.graphPointsDrawnCount));
-    value.graph->addData(key, price);
+    value.graph->addData(key, value.normalizedPrice);
   } // end for
 
-  if (isResettingRefs || isResettingSymbols)
-    resetTickerData(isResettingRefs, isResettingSymbols);
+  if (refResult.isResettingRef || isResettingSymbols)
+    resetTickerData(refResult.isResettingRef, isResettingSymbols);
 
   if (updatingMinMax) {
-    auto const diff = (maxValue - minValue) / 19.0;
-    minValue -= diff;
-    maxValue += diff;
-    ui->customPlot->yAxis->setRange(minValue, maxValue);
+    auto const diff = (refResult.maxValue - refResult.minValue) / 19.0;
+    refResult.minValue -= diff;
+    refResult.maxValue += diff;
+    ui->customPlot->yAxis->setRange(refResult.minValue, refResult.maxValue);
   }
 }
 

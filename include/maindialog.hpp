@@ -82,6 +82,13 @@ struct price_updater_t {
   cthread_ptr thread = nullptr;
 };
 
+struct ref_calculation_data_t {
+  bool isResettingRef = false;
+  bool eachTickNormalize = false;
+  double minValue = std::numeric_limits<double>::max();
+  double maxValue = -minValue;
+};
+
 using token_list_t = std::vector<token_t>;
 
 enum class ticker_reset_type_e {
@@ -146,6 +153,9 @@ private:
   korrelator::trade_action_e lineCrossedOver(
       double const prevRef, double const currRef,
       double const prevValue, double const currValue);
+  korrelator::ref_calculation_data_t updateRefGraph(
+      double const keyStart, double const keyEnd, bool const updateGraph);
+
   QString actionTypeToString(korrelator::trade_action_e a) const {
     if (a == korrelator::trade_action_e::buy)
       return "BUY";
@@ -168,8 +178,10 @@ private:
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
   double m_threshold = 0.0;
+
   double m_specialRef = std::numeric_limits<double>::max();
   bool m_findingSpecialRef = false;
+
   bool m_programIsRunning = false;
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;

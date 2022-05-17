@@ -1,18 +1,197 @@
 #include "cwebsocket.hpp"
+#include <QDebug>
+#include <QThread>
 
-#include <QWebSocket>
-#include <optional>
 #include <rapidjson/document.h>
 
 namespace korrelator {
 
-extern QSslConfiguration getSSLConfig();
+namespace detail {
+char const * const custom_socket::futures_url =
+    "fstream.binance.com";
+char const * const custom_socket::spot_url =
+    "stream.binance.com";
+char const * const custom_socket::spot_port = "9443";
+char const * const custom_socket::futures_port = "443";
 
-std::optional<std::pair<QString, double>> getCoinPrice(QString const &t) {
-  auto const text = t.toStdString();
 
+custom_socket::~custom_socket() {
+  m_resolver.reset();
+  m_sslWebStream.reset();
+  m_readBuffer.reset();
+  m_writeBuffer.clear();
+  qDebug() << "Destroyed";
+}
+
+void custom_socket::startConnection() {
+
+  if (m_requestedToStop)
+    return;
+
+  m_resolver.emplace(m_ioContext);
+  m_resolver->async_resolve(m_host, m_port,
+        [self = shared_from_this()](auto const error_code, results_type const &results) {
+    if (error_code) {
+      qDebug() << error_code.message().c_str();
+      return;
+    }
+    self->websockConnectToResolvedNames(results);
+  });
+}
+
+void custom_socket::websockConnectToResolvedNames(
+    resolver_result_type const &resolvedNames) {
+  m_resolver.reset();
+  m_sslWebStream.emplace(m_ioContext, m_sslContext);
+  beast::get_lowest_layer(*m_sslWebStream)
+      .expires_after(std::chrono::seconds(30));
+  beast::get_lowest_layer(*m_sslWebStream)
+      .async_connect(resolvedNames,
+                     [self = shared_from_this()](auto const &errorCode,
+                     resolver_result_type::endpoint_type const &connectedName)
+  {
+    if (errorCode) {
+      qDebug() << errorCode.message().c_str();
+      return;
+    }
+    self->websockPerformSslHandshake(connectedName);
+  });
+}
+
+void custom_socket::websockPerformSslHandshake(
+    resolver_result_type::endpoint_type const &endpoint)
+{
+  auto const host = m_host + ":" + std::to_string(endpoint.port());
+
+  // Set a timeout on the operation
+  beast::get_lowest_layer(*m_sslWebStream)
+      .expires_after(std::chrono::seconds(30));
+
+  // Set SNI Hostname (many hosts need this to handshake successfully)
+  if (!SSL_set_tlsext_host_name(m_sslWebStream->next_layer().native_handle(),
+                                host.c_str())) {
+    auto const ec = beast::error_code(static_cast<int>(::ERR_get_error()),
+                                      net::error::get_ssl_category());
+    qDebug() << ec.message().c_str();
+    return;
+  }
+  negotiateWebsocketConnection();
+}
+
+void custom_socket::negotiateWebsocketConnection() {
+  m_sslWebStream->next_layer().async_handshake(
+        net::ssl::stream_base::client,
+        [self = shared_from_this()](beast::error_code const ec)
+  {
+    if (ec) {
+      qDebug() << ec.message().c_str();
+      return;
+    }
+    beast::get_lowest_layer(*self->m_sslWebStream).expires_never();
+    self->performWebsocketHandshake();
+  });
+}
+
+void custom_socket::performWebsocketHandshake() {
+  auto const urlPath = "/stream?streams=" + m_tokenName.tokenName + "@aggTrade";
+
+  auto opt = beast::websocket::stream_base::timeout();
+  opt.idle_timeout = std::chrono::seconds(50);
+  opt.handshake_timeout = std::chrono::seconds(20);
+  opt.keep_alive_pings = true;
+  m_sslWebStream->set_option(opt);
+
+  m_sslWebStream->control_callback(
+        [self = shared_from_this()](auto const frame_type, auto const &) {
+    if (frame_type == beast::websocket::frame_type::close) {
+      self->m_sslWebStream.reset();
+      return self->startConnection();
+    }
+  });
+
+  m_sslWebStream->async_handshake(
+        m_host, urlPath, [self = shared_from_this()](beast::error_code const ec) {
+    if (ec) {
+      qDebug() << ec.message().c_str();
+      return;
+    }
+
+    self->waitForMessages();
+  });
+}
+
+void custom_socket::waitForMessages() {
+  m_readBuffer.emplace();
+  m_sslWebStream->async_read(
+       *m_readBuffer,
+        [self = shared_from_this()](beast::error_code const error_code, std::size_t const) {
+         if (error_code == net::error::operation_aborted) {
+           qDebug() << error_code.message().c_str();
+           return;
+         } else if (error_code) {
+           qDebug() << error_code.message().c_str();
+           self->m_sslWebStream.reset();
+           return self->startConnection();
+         }
+         self->interpretGenericMessages();
+       });
+ }
+
+void custom_socket::interpretGenericMessages() {
+  if (m_requestedToStop)
+    return;
+
+  char const *buffer_cstr = static_cast<char const *>(
+        m_readBuffer->cdata().data());
+  auto const optMessage = getCoinPrice(buffer_cstr, m_readBuffer->size());
+  if (optMessage) {
+    auto& value = *optMessage;
+    m_onNewPriceCallback(value.first, value.second, m_tradeType);
+  }
+
+  if (!m_tokenName.subscribed)
+    return makeSubscription();
+  waitForMessages();
+}
+
+void custom_socket::makeSubscription() {
+  m_writeBuffer = QString(R"(
+    {
+      "method": "SUBSCRIBE",
+      "params":
+      [
+        "%1@ticker",
+        "%1@aggTrade"
+      ],
+      "id": 10
+    })").arg(m_tokenName.tokenName.c_str()).toStdString();
+
+  m_sslWebStream->async_write(
+        net::buffer(m_writeBuffer),
+        [self = shared_from_this()](auto const errCode, size_t const)
+  {
+    if (errCode) {
+      qDebug() << errCode.message().c_str();
+      return;
+    }
+    self->m_writeBuffer.clear();
+    self->m_tokenName.subscribed = true;
+    self->waitForMessages();
+  });
+}
+
+void custom_socket::requestStop() {
+  m_requestedToStop = true;
+}
+
+#ifdef _MSC_VER
+#undef GetObject
+#endif
+
+std::optional<std::pair<QString, double>> getCoinPrice(
+    char const* str, size_t const size) {
   rapidjson::Document d;
-  d.Parse(text.c_str(), text.size());
+  d.Parse(str, size);
 
   try {
     auto const jsonObject = d.GetObject();
@@ -29,12 +208,11 @@ std::optional<std::pair<QString, double>> getCoinPrice(QString const &t) {
     std::string const type = typeIter->value.GetString();
     bool const is24HrTicker = type.length() == 10 && type[0] == '2' &&
         type.back() == 'r';
-    bool const isAggregateTrade = type.length() == 7 && type[0] == 'a' &&
+    bool const isAggregateTrade = type.length() == 8 && type[0] == 'a' &&
         type[3] == 'T' && type.back() == 'e';
 
     if (is24HrTicker || isAggregateTrade) {
       char const * amountStr = isAggregateTrade ? "p" : "c";
-
       QString const tokenName = dataObject.FindMember("s")->value.GetString();
       auto const amount =
           std::atof(dataObject.FindMember(amountStr)->value.GetString());
@@ -43,193 +221,74 @@ std::optional<std::pair<QString, double>> getCoinPrice(QString const &t) {
   } catch(...) {
     return std::nullopt;
   }
-
-  if (d.HasParseError() || !d.IsObject()) {
-    Q_ASSERT(false);
-    return std::nullopt;
-  }
-
   return std::nullopt;
 }
 
-cwebsocket::cwebsocket() {}
+std::unique_ptr<net::io_context>& getRawIOContext() {
+  static std::unique_ptr<net::io_context> ioContext = nullptr;
+  return ioContext;
+}
+
+net::io_context* getIOContext() {
+  auto& ioContext = getRawIOContext();
+  if (!ioContext) {
+    ioContext = std::make_unique<net::io_context>(
+    std::thread::hardware_concurrency());
+  }
+  return ioContext.get();
+}
+
+
+net::ssl::context& getSSLContext() {
+  static std::unique_ptr<net::ssl::context> ssl_context = nullptr;
+  if (!ssl_context) {
+    ssl_context = std::make_unique<net::ssl::context>(net::ssl::context::tlsv12_client);
+    ssl_context->set_default_verify_paths();
+    ssl_context->set_verify_mode(boost::asio::ssl::verify_none);
+  }
+  return *ssl_context;
+}
+
+} // namespace detail
+
+cwebsocket::cwebsocket(price_callback priceCallback)
+  : m_sslContext(detail::getSSLContext())
+  , m_onNewCallback(std::move(priceCallback))
+{
+  detail::getRawIOContext().reset();
+  m_ioContext = detail::getIOContext();
+}
 
 cwebsocket::~cwebsocket() {
-  m_stopRequested = true;
-  reset();
+  m_ioContext->stop();
+
+  for(auto& sock: m_sockets)
+    sock->requestStop();
+
+  m_sockets.clear();
+}
+
+void cwebsocket::addSubscription(QString const &tokenName, trade_type_e const tt)
+{
+  auto iter = m_checker.find(tokenName);
+  if (iter != m_checker.end() && iter->second == tt)
+    return;
+  m_checker[tokenName] = tt;
+  m_sockets.push_back(
+        std::make_shared<detail::custom_socket>(
+          *m_ioContext, m_sslContext, tokenName.toLower().toStdString(),
+          m_onNewCallback, tt));
 }
 
 void cwebsocket::startWatch() {
-  auto& futures = m_subscribedTokens[static_cast<int>(trade_type_e::futures)];
-  auto& spots = m_subscribedTokens[static_cast<int>(trade_type_e::spot)];
-  if (futures.empty())
-    futures.insert("runeusdt");
-  if (spots.empty())
-    spots.insert("runeusdt");
+  m_checker.clear();
 
-  initializeThreadForConnection();
-}
-
-void cwebsocket::openConnections() {
-  if (m_subscribedTokens[0].empty() || m_subscribedTokens[1].empty()) {
-    qDebug() << "Cannot open connections";
-    return;
+  for (auto& sock: m_sockets) {
+    std::thread([&sock, this]{
+      sock->startConnection();
+      m_ioContext->run();
+    }).detach();
   }
-
-  auto const &spotToken =
-      *m_subscribedTokens[static_cast<int>(trade_type_e::spot)].begin();
-
-  auto const &futuresToken =
-      *m_subscribedTokens[static_cast<int>(trade_type_e::futures)].begin();
-
-  auto spotUrl_ = "wss://stream.binance.com:9443/stream?streams=" + spotToken + "@ticker/" + spotToken + "@aggTrade";
-  auto futuresUrl_ = "wss://fstream.binance.com/stream?streams=" + futuresToken + "@ticker/" + futuresToken + "@aggTrade";
-  QMetaObject::invokeMethod(
-      this,
-      [this, spotUrl = std::move(spotUrl_),
-       futuresUrl = std::move(futuresUrl_)] {
-        m_spotWebsocket->open(QUrl(spotUrl));
-        m_futuresWebsocket->open(QUrl(futuresUrl));
-      },
-      Qt::AutoConnection);
-}
-
-void cwebsocket::reestablishConnections() {
-  m_connectionRegained = false;
-
-  if (m_stopRequested)
-    return;
-
-  QThread::currentThread()->sleep(2);
-  openConnections();
-}
-
-void cwebsocket::onSpotConnectionEstablished() {
-  m_isStarted = true;
-
-  int i = 200;
-  for (auto const &spotToken :
-       m_subscribedTokens[static_cast<int>(trade_type_e::spot)]) {
-    auto const spotMessage = QString(R"(
-    {
-      "method": "SUBSCRIBE",
-      "params":
-      [
-        "%1@ticker",
-        "%1@aggTrade"
-      ],
-      "id": %2
-    })").arg(spotToken).arg(++i);
-    m_spotWebsocket->sendTextMessage(spotMessage);
-  }
-}
-
-void cwebsocket::onFuturesConnectionEstablished() {
-  int i = 20;
-  for (auto const &futuresToken :
-       m_subscribedTokens[static_cast<int>(trade_type_e::futures)]) {
-    auto const depthMessage = QString(R"(
-    {
-      "method": "SUBSCRIBE",
-      "params":
-      [
-        "%1@ticker",
-        "%1@aggTrade"
-      ],
-      "id": %2
-    })").arg(futuresToken).arg(++i);
-    m_futuresWebsocket->sendTextMessage(depthMessage);
-  }
-
-  if (!m_connectionRegained) {
-    m_connectionRegained = true;
-    emit connectionRegained();
-  }
-}
-
-void cwebsocket::initializeThreadForConnection() {
-  reset();
-
-  m_futuresWebsocket = std::make_unique<QWebSocket>();
-  m_spotWebsocket = std::make_unique<QWebSocket>();
-  m_worker = std::make_unique<Worker>([this] { openConnections(); });
-  m_thread.reset(new QThread);
-
-  m_futuresWebsocket->setSslConfiguration(getSSLConfig());
-  m_spotWebsocket->setSslConfiguration(getSSLConfig());
-
-  QObject::connect(m_spotWebsocket.get(), &QWebSocket::connected, this,
-                   [this] { onSpotConnectionEstablished(); });
-  QObject::connect(m_futuresWebsocket.get(), &QWebSocket::connected, this,
-                   [this] { onFuturesConnectionEstablished(); });
-  QObject::connect(m_spotWebsocket.get(), &QWebSocket::disconnected, this,
-                   [this] { reestablishConnections(); });
-  QObject::connect(m_futuresWebsocket.get(), &QWebSocket::disconnected, this,
-                   [this] { reestablishConnections(); });
-  QObject::connect(m_futuresWebsocket.get(), &QWebSocket::textMessageReceived,
-                   m_worker.get(),
-                   [this](QString const &t) { onFuturesMessageReceived(t); });
-  QObject::connect(m_spotWebsocket.get(), &QWebSocket::textMessageReceived,
-                   m_worker.get(),
-                   [this](QString const &t) { onSpotMessageReceived(t); });
-
-  QObject::connect(
-      m_spotWebsocket.get(),
-      static_cast<void (QWebSocket::*)(QAbstractSocket::SocketError)>(
-          &QWebSocket::error),
-      this, [this](QAbstractSocket::SocketError const e) {
-        emit connectionLost();
-        qDebug() << e;
-      });
-
-  QObject::connect(
-      m_futuresWebsocket.get(),
-      static_cast<void (QWebSocket::*)(QAbstractSocket::SocketError)>(
-          &QWebSocket::error),
-      this, [this](QAbstractSocket::SocketError const e) {
-        emit connectionLost();
-        qDebug() << e;
-      });
-
-  QObject::connect(m_thread.get(), &QThread::started, m_worker.get(),
-                   &Worker::startWork);
-
-  m_worker->moveToThread(m_thread.get());
-  m_thread->start();
-}
-
-void cwebsocket::reset() {
-  if (m_futuresWebsocket) {
-    m_futuresWebsocket->close(QWebSocketProtocol::CloseCodeNormal);
-    m_futuresWebsocket->disconnect();
-  }
-
-  if (m_spotWebsocket) {
-    m_spotWebsocket->close(QWebSocketProtocol::CloseCodeNormal);
-    m_spotWebsocket->disconnect();
-  }
-
-  m_futuresWebsocket.reset();
-  m_spotWebsocket.reset();
-  m_worker.reset();
-  m_thread.reset();
-  m_isStarted = false;
-}
-
-void cwebsocket::onSpotMessageReceived(QString const &t) {
-  auto const tokenPricePair = getCoinPrice(t);
-  if (!tokenPricePair)
-    return;
-  auto const &[tokenName, amount] = *tokenPricePair;
-  emit newPriceReceived(tokenName, amount, (int)trade_type_e::spot);
-}
-
-void cwebsocket::onFuturesMessageReceived(QString const &t) {
-  auto const tokenPricePair = getCoinPrice(t);
-  if (!tokenPricePair)
-    return;
-  auto const &[tokenName, amount] = *tokenPricePair;
-  emit newPriceReceived(tokenName, amount, (int)trade_type_e::futures);
 }
 
 } // namespace korrelator
