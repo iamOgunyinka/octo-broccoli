@@ -143,7 +143,7 @@ void custom_socket::interpretGenericMessages() {
 
   char const *buffer_cstr = static_cast<char const *>(
         m_readBuffer->cdata().data());
-  auto const optMessage = getCoinPrice(buffer_cstr, m_readBuffer->size());
+  auto const optMessage = binanceGetCoinPrice(buffer_cstr, m_readBuffer->size());
   if (optMessage) {
     auto& value = *optMessage;
     m_onNewPriceCallback(value.first, value.second, m_tradeType);
@@ -188,7 +188,7 @@ void custom_socket::requestStop() {
 #undef GetObject
 #endif
 
-std::optional<std::pair<QString, double>> getCoinPrice(
+std::optional<std::pair<QString, double>> binanceGetCoinPrice(
     char const* str, size_t const size) {
   rapidjson::Document d;
   d.Parse(str, size);

@@ -105,6 +105,8 @@ void MainDialog::populateUIComponents() {
       {"Top Left", "Top Right", "Bottom Left", "Bottom Right"});
   ui->umbralLine->setValidator(new QDoubleValidator);
   ui->umbralLine->setText("5");
+
+  ui->exchangeCombo->addItems({"Binance", "KuCoin"});
 }
 
 void MainDialog::onApplyButtonClicked() {
@@ -161,6 +163,12 @@ void MainDialog::connectAllUISignals() {
         ui->restartTickLine->setFocus();
       });
 
+  QObject::connect(ui->exchangeCombo,
+                   static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+                   this, [this](int const index)
+  {
+  });
+
   QObject::connect(ui->applyButton, &QPushButton::clicked, this,
                    &MainDialog::onApplyButtonClicked);
   QObject::connect(this, &MainDialog::newOrderDetected, this,
@@ -183,6 +191,7 @@ void MainDialog::connectAllUISignals() {
                          korrelator::trade_type_e::spot);
     saveTokensToFile();
   });
+
   QObject::connect(ui->spotPrevButton, &QToolButton::clicked, this, [this] {
     auto currentRow = ui->tokenListWidget->currentRow();
     if (currentRow < 0 || currentRow >= ui->tokenListWidget->count())
@@ -217,6 +226,7 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->applyButton->setEnabled(enabled);
   ui->specialLine->setEnabled(enabled);
   ui->specialLine->setEnabled(enabled);
+  ui->exchangeCombo->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {

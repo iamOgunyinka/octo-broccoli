@@ -20,7 +20,9 @@ SOURCES += main.cpp \
   src/cwebsocket.cpp \
   src/maindialog.cpp \
   src/order_model.cpp \
-  src/qcustomplot.cpp
+  src/qcustomplot.cpp \
+  src/uri.cpp \
+  src/websocket_base.cpp
 
 HEADERS += \
   include/container.hpp \
@@ -28,7 +30,9 @@ HEADERS += \
   include/maindialog.hpp \
   include/order_model.hpp \
   include/qcustomplot.h \
-  include/sthread.hpp
+  include/sthread.hpp \
+  include/uri.hpp \
+  include/websocket_base.hpp
 
 FORMS += \
     ui/maindialog.ui

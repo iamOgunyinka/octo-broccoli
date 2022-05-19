@@ -88,7 +88,7 @@ private:
   bool m_requestedToStop = false;
 };
 
-std::optional<std::pair<QString, double>> getCoinPrice(
+std::optional<std::pair<QString, double>> binanceGetCoinPrice(
     char const* str, size_t const size);
 
 } // namespace detail
