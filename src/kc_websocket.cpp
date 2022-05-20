@@ -1,4 +1,4 @@
-#include "websocket_base.hpp"
+#include "kc_websocket.hpp"
 #include <QDebug>
 
 #include <rapidjson/document.h>
@@ -9,57 +9,77 @@
 #endif
 
 namespace korrelator {
-static char const* const kucoin_spot_api_url = "api.kucoin.com";
-static char const* const kucoin_spot_http_request =
+static char const* const kc_spot_api_url = "api.kucoin.com";
+static char const * const spot_data_topic = "/market/ticker:";
+static size_t const spot_data_topic_len = strlen(spot_data_topic);
+static char const* const kc_spot_http_request =
     "POST /api/v1/bullet-public HTTP/1.1\r\n"
     "Host: api.kucoin.com\r\n"
     "Accept: */*\r\n"
     "Content-Type: application/json\r\n"
     "User-Agent: postman\r\n\r\n";
-static size_t const http_request_len = strlen(kucoin_spot_http_request);
-static char const * const data_topic = "/market/ticker:";
-static size_t const data_topic_len = strlen(data_topic);
+static size_t const spot_http_request_len = strlen(kc_spot_http_request);
+
+static char const* const kc_futures_api_url = "api-futures.kucoin.com";
+static char const * const futures_data_topic = "/contractMarket/ticker:";
+static size_t const futures_data_topic_len = strlen(futures_data_topic);
+static char const* const kc_futures_http_request =
+    "POST /api/v1/bullet-public HTTP/1.1\r\n"
+    "Host: api-futures.kucoin.com\r\n"
+    "Accept: */*\r\n"
+    "Content-Type: application/json\r\n"
+    "User-Agent: postman\r\n\r\n";
+static size_t const futures_http_request_len =
+    strlen(kc_futures_http_request);
+
+
 
 std::optional<std::pair<QString, double>> kuCoinGetCoinPrice(
-    char const* str, size_t const size) {
+    char const* str, size_t const size, bool const isSpot) {
   rapidjson::Document d;
   d.Parse(str, size);
 
-  try {
-    auto const jsonObject = d.GetObject();
-    auto const topicIter = jsonObject.FindMember("topic");
-    if (topicIter == jsonObject.MemberEnd() || !topicIter->value.IsString())
-      return std::nullopt;
+  auto const jsonObject = d.GetObject();
+  auto const topicIter = jsonObject.FindMember("topic");
+  if (topicIter == jsonObject.MemberEnd() || !topicIter->value.IsString())
+    return std::nullopt;
 
-    QString const topic = topicIter->value.GetString();
-    int const indexOfTopic = topic.indexOf(data_topic);
-    if (indexOfTopic == -1)
-      return std::nullopt;
+  QString const topic = topicIter->value.GetString();
+  auto const topicChar = isSpot ? spot_data_topic : futures_data_topic;
 
-    auto const tokenName = topic.mid(data_topic_len);
+  int const indexOfTopic = topic.indexOf(topicChar);
+  if (indexOfTopic == -1)
+    return std::nullopt;
 
-    auto iter = jsonObject.FindMember("data");
-    if (iter == jsonObject.end())
-      return std::nullopt;
-    auto const dataObject = iter->value.GetObject();
-    auto const priceIter = dataObject.FindMember("price");
-    if (priceIter == dataObject.MemberEnd() || !priceIter->value.IsString()) {
-      Q_ASSERT(false);
-      return std::nullopt;
-    }
-
-    double const price = std::stod(priceIter->value.GetString());
-    return std::make_pair(tokenName, price);
-  } catch(std::exception const & e) {
+  auto iter = jsonObject.FindMember("data");
+  if (iter == jsonObject.end())
+    return std::nullopt;
+  auto const dataObject = iter->value.GetObject();
+  auto const priceIter = dataObject.FindMember("price");
+  auto const expectedType = isSpot ?
+        rapidjson::Type::kStringType : rapidjson::Type::kNumberType;
+  if (priceIter == dataObject.MemberEnd() ||
+      (priceIter->value.GetType() != expectedType)) {
+    assert(false);
     return std::nullopt;
   }
-  return std::nullopt;
+
+  auto const tokenName = isSpot ?
+        topic.mid((int)spot_data_topic_len) :
+        topic.mid((int)futures_data_topic_len);
+  double price = 0.0;
+  if (isSpot)
+    price = std::stod(priceIter->value.GetString());
+  else
+    price = priceIter->value.GetDouble();
+  return std::make_pair(tokenName, price);
 }
 
-kc_websocket::kc_websocket(net::io_context& ioContext,
-                           ssl::context& sslContext)
+kc_websocket::kc_websocket(net::io_context& ioContext, ssl::context& sslContext,
+                           trade_type_e const tradeType)
   : m_ioContext(ioContext)
   , m_sslContext(sslContext)
+  , m_isSpotTrade(tradeType == trade_type_e::spot)
 {
 }
 
@@ -71,7 +91,7 @@ kc_websocket::~kc_websocket() {
   m_instanceServers.clear();
   m_websocketToken.clear();
   m_subscriptionString.clear();
-  qDebug() << "KuCoin destroyed";
+  qDebug() << "KuCoin websocket destroyed";
 }
 
 void kc_websocket::restApiInitiateConnection() {
@@ -82,10 +102,12 @@ void kc_websocket::restApiInitiateConnection() {
   m_websocketToken.clear();
   m_tokensSubscribedFor = false;
 
+  auto const url = m_isSpotTrade ?
+        kc_spot_api_url : kc_futures_api_url;
   m_resolver.emplace(m_ioContext);
-  m_resolver->async_resolve(
-        kucoin_spot_api_url, "https", [this](auto const errorCode,
-        resolver::results_type const& results) {
+  m_resolver->async_resolve(url,
+                            "https", [this](auto const errorCode,
+                            resolver::results_type const& results) {
     if (errorCode) {
       qDebug() << errorCode.message().c_str();
       return;
@@ -114,10 +136,13 @@ void kc_websocket::restApiConnectToResolvedNames(
 }
 
 void kc_websocket::restApiPerformSSLHandshake() {
+  auto const url = m_isSpotTrade ?
+        kc_spot_api_url: kc_futures_api_url;
+
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(15));
   if (!SSL_set_tlsext_host_name(m_sslWebStream->next_layer().native_handle(),
-                                kucoin_spot_api_url)) {
+                                url)) {
     auto const ec = beast::error_code(static_cast<int>(::ERR_get_error()),
                                       net::error::get_ssl_category());
     qDebug() << ec.message().c_str();
@@ -135,9 +160,13 @@ void kc_websocket::restApiPerformSSLHandshake() {
 }
 
 void kc_websocket::restApiSendRequest() {
+  char const * const request = m_isSpotTrade ?
+        kc_spot_http_request : kc_futures_http_request;
+  size_t const request_len = m_isSpotTrade ?
+        spot_http_request_len : futures_http_request_len;
   beast::get_lowest_layer(*m_sslWebStream).expires_after(std::chrono::seconds(10));
   m_sslWebStream->next_layer().async_write_some(
-        net::const_buffer(kucoin_spot_http_request, http_request_len),
+        net::const_buffer(request, request_len),
         [this](auto const errorCode, auto const sizeWritten) {
     if (errorCode) {
       qDebug() << errorCode.message().c_str();
@@ -334,7 +363,7 @@ void kc_websocket::performWebsocketHandshake() {
   });
 
   auto const path = m_uri.path() + "?token=" + m_websocketToken +
-      "&[connectId=" + get_random_string(10) + "]";
+      "&connectId=" + get_random_string(10);
   qDebug() << "Websocket path:" << path.c_str();
 
   m_sslWebStream->async_handshake(
@@ -374,7 +403,8 @@ void kc_websocket::interpretGenericMessages() {
   char const* bufferCstr = static_cast<char const*>(
         m_readWriteBuffer->cdata().data());
   size_t const dataLength = m_readWriteBuffer->size();
-  auto const optMessage = kuCoinGetCoinPrice(bufferCstr, dataLength);
+  auto const optMessage =
+      kuCoinGetCoinPrice(bufferCstr, dataLength, m_isSpotTrade);
   if (optMessage) {
     qDebug() << optMessage->first << optMessage->second;
   }
@@ -385,14 +415,18 @@ void kc_websocket::interpretGenericMessages() {
 }
 
 void kc_websocket::makeSubscription() {
+  static char const * const subscriptionFormat = R"({
+    "id": %1,
+    "type": "subscribe",
+    "topic": "/%2/ticker:%3",
+    "response": false
+  })";
+
   if (m_subscriptionString.empty()) {
-    m_subscriptionString = QString(R"(
-    {
-      "id": %1,
-      "type": "subscribe",
-      "topic": "/market/ticker:%2",
-      "response": false
-    })").arg(get_random_integer()).arg(m_tokenList.c_str()).toStdString();
+    m_subscriptionString = QString(subscriptionFormat)
+        .arg(get_random_integer())
+        .arg((m_isSpotTrade ? "market" : "contractMarket"),
+             m_tokenList.c_str()).toStdString();
     m_tokenList.clear();
   }
 

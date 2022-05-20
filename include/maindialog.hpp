@@ -96,13 +96,25 @@ enum class ticker_reset_type_e {
   ref_symbols,
   both
 };
+
+struct watchable_data_t {
+  korrelator::token_list_t spots;
+  korrelator::token_list_t futures;
+
+  korrelator::token_list_t tokens;
+  korrelator::token_list_t refs;
+};
+
 }
+
+using korrelator::exchange_name_e;
 
 class MainDialog : public QDialog
 {
   Q_OBJECT
 
-  using callback_t = std::function<void(korrelator::token_list_t &&)>;
+  using callback_t = std::function<void(korrelator::token_list_t &&,
+                                        exchange_name_e)>;
   using list_iterator = korrelator::token_list_t::iterator;
 
 signals:
@@ -114,9 +126,9 @@ public:
   ~MainDialog();
 
 private:
-  void getSpotsTokens(callback_t = nullptr);
-  void getFuturesTokens(callback_t = nullptr);
-  void sendNetworkRequest(QUrl const &url, callback_t);
+  void getSpotsTokens(exchange_name_e const, callback_t = nullptr);
+  void getFuturesTokens(exchange_name_e const, callback_t = nullptr);
+  void sendNetworkRequest(QUrl const &url, callback_t, exchange_name_e const);
   void newItemAdded(QString const &token, korrelator::trade_type_e const);
   void tokenRemoved(QString const &text);
   void onTimerTick();
@@ -168,15 +180,16 @@ private:
   QNetworkAccessManager m_networkManager;
   korrelator::cwebsocket_ptr m_websocket = nullptr;
   std::unique_ptr<korrelator::order_model> m_model = nullptr;
-  korrelator::token_list_t m_tokens;
-  korrelator::token_list_t m_refs;
-  korrelator::token_list_t::iterator m_refIterator;
+
+  QMap<int, korrelator::watchable_data_t> m_watchables;
+  // korrelator::token_list_t::iterator m_refIterator;
   std::mutex m_mutex;
 
   korrelator::graph_updater_t m_graphUpdater;
   korrelator::price_updater_t m_priceUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
+  korrelator::exchange_name_e m_currentExchange;
   double m_threshold = 0.0;
 
   double m_specialRef = std::numeric_limits<double>::max();

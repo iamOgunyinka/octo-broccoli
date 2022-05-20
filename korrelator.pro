@@ -18,21 +18,22 @@ QMAKE_CXXFLAGS += -bigobj
 
 SOURCES += main.cpp \
   src/cwebsocket.cpp \
+  src/kc_websocket.cpp \
   src/maindialog.cpp \
   src/order_model.cpp \
   src/qcustomplot.cpp \
-  src/uri.cpp \
-  src/websocket_base.cpp
+  src/uri.cpp
 
 HEADERS += \
-  include/container.hpp \
   include/cwebsocket.hpp \
+  include/kc_websocket.hpp \
   include/maindialog.hpp \
   include/order_model.hpp \
   include/qcustomplot.h \
   include/sthread.hpp \
   include/uri.hpp \
-  include/websocket_base.hpp
+  include/websocket_base.hpp \
+  utils.hpp
 
 FORMS += \
     ui/maindialog.ui

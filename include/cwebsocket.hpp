@@ -11,19 +11,20 @@
 #include <optional>
 #include <map>
 
+#include "websocket_base.hpp"
+#include "utils.hpp"
+
 namespace korrelator {
 
 namespace net = boost::asio;
 namespace beast = boost::beast;
 namespace ip = net::ip;
 
-enum class trade_type_e { spot, futures };
-
-using price_callback = std::function<void(QString const &, double const,
-trade_type_e const)>;
+using price_callback =
+  std::function<void(QString const &, double const, trade_type_e const)>;
 
 namespace detail {
-class custom_socket // : public std::enable_shared_from_this<custom_socket>
+class custom_socket : public websocket_base
 {
   using resolver_result_type = net::ip::tcp::resolver::results_type;
 
@@ -31,11 +32,6 @@ class custom_socket // : public std::enable_shared_from_this<custom_socket>
   static char const * const spot_url;
   static char const * const spot_port;
   static char const * const futures_port;
-
-  struct internal_address_t {
-    std::string tokenName;
-    bool        subscribed = false;
-  };
 
   using address_list_t = std::vector<internal_address_t>;
 public:
@@ -45,22 +41,24 @@ public:
 
   custom_socket(
       net::io_context &ioContext, net::ssl::context& sslContext,
-      std::string const &tokenName, price_callback& cb,
-      trade_type_e const tradeType)
+      price_callback& cb, trade_type_e const tradeType)
     : m_host(tradeType == trade_type_e::spot ? spot_url: futures_url)
     , m_port(tradeType == trade_type_e::spot ? spot_port: futures_port)
     , m_tradeType(tradeType)
     , m_ioContext(ioContext)
     , m_sslContext(sslContext)
     , m_onNewPriceCallback(cb)
-    , m_tokenName{tokenName, false}
   {
   }
 
   ~custom_socket();
 
-  void startConnection();
-  void requestStop();
+  void startFetching() override;
+  void addSubscription(std::string const &tokenName) override {
+    m_tokenName = internal_address_t{tokenName, false};
+  }
+
+  void requestStop() override;
 
 private:
   custom_socket* shared_from_this(){ return this; }
@@ -94,8 +92,14 @@ std::optional<std::pair<QString, double>> binanceGetCoinPrice(
 } // namespace detail
 
 class cwebsocket {
+  struct exchange_trade_pair {
+    trade_type_e tradeType;
+    exchange_name_e exchange;
+  };
+
 public:
-  void addSubscription(QString const &, trade_type_e const tt);
+  void addSubscription(QString const &, trade_type_e const tt,
+                       exchange_name_e const exchange);
   void startWatch();
 
   cwebsocket(price_callback cb);
@@ -104,8 +108,8 @@ public:
 private:
   net::ssl::context& m_sslContext;
   net::io_context* m_ioContext = nullptr;
-  std::vector<std::shared_ptr<detail::custom_socket>> m_sockets;
-  std::map<QString, trade_type_e> m_checker;
+  std::vector<std::shared_ptr<websocket_base>> m_sockets;
+  std::map<QString, exchange_trade_pair> m_checker;
   price_callback m_onNewCallback;
 };
 

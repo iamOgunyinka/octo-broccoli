@@ -3,6 +3,7 @@
 #include <QThread>
 
 #include <rapidjson/document.h>
+#include "kc_websocket.hpp"
 
 namespace korrelator {
 
@@ -23,8 +24,7 @@ custom_socket::~custom_socket() {
   qDebug() << "Destroyed";
 }
 
-void custom_socket::startConnection() {
-
+void custom_socket::startFetching() {
   if (m_requestedToStop)
     return;
 
@@ -105,7 +105,7 @@ void custom_socket::performWebsocketHandshake() {
         [self = shared_from_this()](auto const frame_type, auto const &) {
     if (frame_type == beast::websocket::frame_type::close) {
       self->m_sslWebStream.reset();
-      return self->startConnection();
+      return self->startFetching();
     }
   });
 
@@ -131,7 +131,7 @@ void custom_socket::waitForMessages() {
          } else if (error_code) {
            qDebug() << error_code.message().c_str();
            self->m_sslWebStream.reset();
-           return self->startConnection();
+           return self->startFetching();
          }
          self->interpretGenericMessages();
        });
@@ -268,16 +268,27 @@ cwebsocket::~cwebsocket() {
   m_sockets.clear();
 }
 
-void cwebsocket::addSubscription(QString const &tokenName, trade_type_e const tt)
+void cwebsocket::addSubscription(
+    QString const &tokenName, trade_type_e const tt,
+    exchange_name_e const exchange)
 {
   auto iter = m_checker.find(tokenName);
-  if (iter != m_checker.end() && iter->second == tt)
+  if (iter != m_checker.end() &&
+      iter->second.tradeType == tt &&
+      iter->second.exchange == exchange)
     return;
-  m_checker[tokenName] = tt;
-  m_sockets.push_back(
-        std::make_shared<detail::custom_socket>(
-          *m_ioContext, m_sslContext, tokenName.toLower().toStdString(),
-          m_onNewCallback, tt));
+  m_checker[tokenName].tradeType = tt;
+  m_checker[tokenName].exchange = exchange;
+
+  if (exchange == exchange_name_e::binance) {
+    m_sockets.push_back(
+          std::make_shared<detail::custom_socket>(
+            *m_ioContext, m_sslContext, tokenName.toLower().toStdString(),
+            m_onNewCallback, tt));
+  } else if (exchange == exchange_name_e::kucoin) {
+    m_sockets.push_back(
+          std::make_shared<kc_websocket>(*m_ioContext, m_sslContext, tt));
+  }
 }
 
 void cwebsocket::startWatch() {
@@ -285,7 +296,7 @@ void cwebsocket::startWatch() {
 
   for (auto& sock: m_sockets) {
     std::thread([&sock, this]{
-      sock->startConnection();
+      sock->startFetching();
       m_ioContext->run();
     }).detach();
   }
