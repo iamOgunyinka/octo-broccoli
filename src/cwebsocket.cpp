@@ -107,7 +107,8 @@ void custom_socket::performWebsocketHandshake() {
       });
 
   m_sslWebStream->async_handshake(
-      m_host, urlPath, [self = shared_from_this()](beast::error_code const ec) {
+      m_host, urlPath.toStdString(),
+      [self = shared_from_this()](beast::error_code const ec) {
         if (ec) {
           qDebug() << ec.message().c_str();
           return;
@@ -143,7 +144,8 @@ void custom_socket::interpretGenericMessages() {
       static_cast<char const *>(m_readBuffer->cdata().data());
   auto const optPrice = binanceGetCoinPrice(bufferCstr, m_readBuffer->size());
   if (!isnan(optPrice))
-    m_tokenProxyIter.setRealPrice(optPrice);
+    emit onNewPriceAvailable(m_tokenName.tokenName, optPrice,
+                             exchange_name_e::binance, m_tradeType);
 
   if (!m_tokenName.subscribed)
     return makeSubscription();
@@ -160,7 +162,9 @@ void custom_socket::makeSubscription() {
         "%1@aggTrade"
       ],
       "id": 10
-    })").arg(m_tokenName.tokenName.c_str()).toStdString();
+    })")
+                      .arg(m_tokenName.tokenName)
+                      .toStdString();
 
   m_sslWebStream->async_write(
       net::buffer(m_writeBuffer),
@@ -249,17 +253,19 @@ cwebsocket::cwebsocket() : m_sslContext(detail::getSSLContext()) {
 cwebsocket::~cwebsocket() {
   m_ioContext->stop();
 
-  for (auto &sock : m_sockets)
-    sock->requestStop();
+  for (auto &sock : m_sockets) {
+    std::visit([](auto && v) {
+      v->requestStop();
+      delete v;
+    }, sock);
+  }
 
   m_sockets.clear();
 }
 
-void cwebsocket::addSubscription(token_proxy_iter &tokenIter) {
-  auto const &tokenName = tokenIter.value().tokenName;
-  auto const tradeType = tokenIter.tradeType();
-  auto const exchange = tokenIter.exchange();
-
+void cwebsocket::addSubscription(QString const &tokenName,
+                                 trade_type_e const tradeType,
+                                 exchange_name_e const exchange) {
   auto iter = m_checker.find(exchange);
   if (iter != m_checker.end()) {
     auto iter2 = std::find_if(
@@ -275,14 +281,25 @@ void cwebsocket::addSubscription(token_proxy_iter &tokenIter) {
     m_checker[exchange].push_back({tradeType, tokenName});
   }
 
+  auto callback = [this](QString const &tokenName, double const price,
+                         exchange_name_e const exchange,
+                         trade_type_e const tradeType) {
+    emit onNewPriceAvailable(tokenName, price, exchange, tradeType);
+  };
+
   if (exchange == exchange_name_e::binance) {
-    m_sockets.push_back(std::make_shared<detail::custom_socket>(
-        *m_ioContext, m_sslContext, tokenIter));
-    m_sockets.back()->addSubscription(tokenName.toLower().toStdString());
+    auto sock = new detail::custom_socket(
+        *m_ioContext, m_sslContext, tradeType);
+    sock->addSubscription(tokenName.toLower());
+    QObject::connect(sock, &detail::custom_socket::onNewPriceAvailable,
+                     this, callback);
+    m_sockets.push_back(std::move(sock));
   } else if (exchange == exchange_name_e::kucoin) {
-    m_sockets.push_back(
-        std::make_shared<kc_websocket>(*m_ioContext, m_sslContext, tokenIter));
-    m_sockets.back()->addSubscription(tokenName.toUpper().toStdString());
+    auto sock = new kc_websocket(*m_ioContext, m_sslContext, tradeType);
+    QObject::connect(sock, &kc_websocket::onNewPriceAvailable, this,
+                     callback);
+    sock->addSubscription(tokenName.toUpper());
+    m_sockets.push_back(std::move(sock));
   }
 }
 
@@ -290,22 +307,13 @@ void cwebsocket::startWatch() {
   m_checker.clear();
 
   for (auto &sock : m_sockets) {
-    std::thread([&sock, this] {
-      sock->startFetching();
-      m_ioContext->run();
-    }).detach();
+    std::visit([this](auto && v) mutable {
+      std::thread([this, &v]() mutable {
+        v->startFetching();
+        m_ioContext->run();
+      }).detach();
+    }, sock);
   }
 }
 
-void updateTokenIter(token_list_t::iterator iter, double const price) {
-  auto &value = *iter;
-  if (value.calculatingNewMinMax) {
-    value.minPrice = price * 0.75;
-    value.maxPrice = price * 1.25;
-    value.calculatingNewMinMax = false;
-  }
-
-  value.minPrice = std::min(value.minPrice, price);
-  value.maxPrice = std::max(value.maxPrice, price);
-}
 } // namespace korrelator

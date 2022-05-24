@@ -100,7 +100,8 @@ private:
   double getMaxPlotsInVisibleRegion() const;
   void updateGraphData(double const key, bool const);
   void setupOrderTableModel();
-
+  void onNewPriceReceived(QString const &, double const price,
+                          exchange_name_e const exchange, trade_type_e const tt);
   Qt::Alignment getLegendAlignment() const;
   list_iterator find(korrelator::token_list_t &container, QString const &,
                      trade_type_e const, exchange_name_e const);
@@ -124,7 +125,6 @@ private:
   korrelator::token_list_t m_tokens;
   korrelator::token_list_t m_refs;
 
-  std::vector<korrelator::token_proxy_iter_ptr> m_tokenProxies;
   korrelator::token_list_t::iterator m_refIterator;
   std::mutex m_mutex;
 

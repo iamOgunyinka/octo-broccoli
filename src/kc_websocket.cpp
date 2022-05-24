@@ -10,8 +10,6 @@
 
 namespace korrelator {
 static char const *const kc_spot_api_url = "api.kucoin.com";
-static char const *const spot_data_topic = "/market/ticker:";
-static size_t const spot_data_topic_len = strlen(spot_data_topic);
 static char const *const kc_spot_http_request =
     "POST /api/v1/bullet-public HTTP/1.1\r\n"
     "Host: api.kucoin.com\r\n"
@@ -21,8 +19,6 @@ static char const *const kc_spot_http_request =
 static size_t const spot_http_request_len = strlen(kc_spot_http_request);
 
 static char const *const kc_futures_api_url = "api-futures.kucoin.com";
-static char const *const futures_data_topic = "/contractMarket/ticker:";
-static size_t const futures_data_topic_len = strlen(futures_data_topic);
 static char const *const kc_futures_http_request =
     "POST /api/v1/bullet-public HTTP/1.1\r\n"
     "Host: api-futures.kucoin.com\r\n"
@@ -37,17 +33,6 @@ double kuCoinGetCoinPrice(char const *str, size_t const size,
   d.Parse(str, size);
 
   auto const jsonObject = d.GetObject();
-  auto const topicIter = jsonObject.FindMember("topic");
-  if (topicIter == jsonObject.MemberEnd() || !topicIter->value.IsString())
-    return NAN;
-
-  QString const topic = topicIter->value.GetString();
-  auto const topicChar = isSpot ? spot_data_topic : futures_data_topic;
-
-  int const indexOfTopic = topic.indexOf(topicChar);
-  if (indexOfTopic == -1)
-    return NAN;
-
   auto iter = jsonObject.FindMember("data");
   if (iter == jsonObject.end())
     return NAN;
@@ -60,25 +45,20 @@ double kuCoinGetCoinPrice(char const *str, size_t const size,
     assert(false);
     return NAN;
   }
-  /*
-  auto const tokenName = isSpot ?
-        topic.mid((int)spot_data_topic_len) :
-        topic.mid((int)futures_data_topic_len);
-        */
-  double price = 0.0;
   if (isSpot)
-    price = std::stod(priceIter->value.GetString());
-  else
-    price = priceIter->value.GetDouble();
-  //  return std::make_pair(tokenName, price);
-  return price;
+    return std::stod(priceIter->value.GetString());
+  return priceIter->value.GetDouble();
 }
 
-kc_websocket::kc_websocket(net::io_context &ioContext, ssl::context &sslContext,
-                           token_proxy_iter &tokenIter)
-    : m_ioContext(ioContext), m_sslContext(sslContext),
-      m_tokenProxyIter(tokenIter),
-      m_isSpotTrade(tokenIter.tradeType() == trade_type_e::spot) {}
+kc_websocket::kc_websocket(
+    net::io_context &ioContext, ssl::context &sslContext,
+    trade_type_e const tradeType)
+    : m_ioContext(ioContext)
+    , m_sslContext(sslContext)
+    , m_tradeType(tradeType)
+    , m_isSpotTrade(tradeType == trade_type_e::spot)
+{
+}
 
 kc_websocket::~kc_websocket() {
   m_resolver.reset();
@@ -244,8 +224,8 @@ void kc_websocket::restApiInterpretHttpResponse() {
     initiateWebsocketConnection();
 }
 
-void kc_websocket::addSubscription(std::string const &tokenName) {
-  if (m_tokenList.empty())
+void kc_websocket::addSubscription(QString const &tokenName) {
+  if (m_tokenList.isEmpty())
     m_tokenList = tokenName;
   else
     m_tokenList += ("," + tokenName);
@@ -386,8 +366,9 @@ void kc_websocket::interpretGenericMessages() {
   auto const optPrice =
       kuCoinGetCoinPrice(bufferCstr, dataLength, m_isSpotTrade);
   if (!isnan(optPrice))
-    m_tokenProxyIter.setRealPrice(optPrice);
-
+    emit onNewPriceAvailable(m_tokenList, optPrice,
+                             exchange_name_e::kucoin,
+                             m_tradeType);
   if (!m_tokensSubscribedFor)
     return makeSubscription();
   return waitForMessages();
@@ -406,9 +387,8 @@ void kc_websocket::makeSubscription() {
         QString(subscriptionFormat)
             .arg(get_random_integer())
             .arg((m_isSpotTrade ? "market" : "contractMarket"),
-                 m_tokenList.c_str())
+                 m_tokenList)
             .toStdString();
-    // m_tokenList.clear();
   }
 
   m_sslWebStream->async_write(net::buffer(m_subscriptionString),

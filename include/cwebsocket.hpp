@@ -1,19 +1,15 @@
 #pragma once
 
 #include <QString>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ssl/context.hpp>
-#include <boost/beast/core.hpp>
-#include <boost/beast/core/tcp_stream.hpp>
-#include <boost/beast/http/message.hpp>
-#include <boost/beast/ssl/ssl_stream.hpp>
-#include <boost/beast/websocket/stream.hpp>
+#include <QObject>
+
 #include <map>
 #include <optional>
+#include <variant>
 
 #include "tokens.hpp"
 #include "utils.hpp"
-#include "websocket_base.hpp"
+#include "kc_websocket.hpp"
 
 namespace korrelator {
 
@@ -25,7 +21,10 @@ using price_callback =
     std::function<void(QString const &, double const, trade_type_e const)>;
 
 namespace detail {
-class custom_socket : public websocket_base {
+class custom_socket : public QObject {
+
+  Q_OBJECT
+
   using resolver_result_type = net::ip::tcp::resolver::results_type;
 
   static char const *const futures_url;
@@ -40,22 +39,26 @@ public:
   using results_type = resolver::results_type;
 
   custom_socket(net::io_context &ioContext, net::ssl::context &sslContext,
-                token_proxy_iter &proxyIter)
-      : m_tradeType(proxyIter.tradeType()),
-        m_host(m_tradeType == trade_type_e::spot ? spot_url : futures_url),
-        m_port(m_tradeType == trade_type_e::spot ? spot_port : futures_port),
-        m_ioContext(ioContext), m_sslContext(sslContext),
-        m_tokenProxyIter(proxyIter) {}
-
+                trade_type_e const tradeType)
+      : m_tradeType(tradeType)
+      , m_host(m_tradeType == trade_type_e::spot ? spot_url : futures_url)
+      , m_port(m_tradeType == trade_type_e::spot ? spot_port : futures_port)
+      , m_ioContext(ioContext)
+      , m_sslContext(sslContext){}
   ~custom_socket();
 
-  void startFetching() override;
-  void addSubscription(std::string const &tokenName) override {
+  void startFetching(); // override;
+  void addSubscription(QString const &tokenName)/* override */ {
     m_tokenName = internal_address_t{tokenName, false};
   }
 
-  void requestStop() override;
+  void requestStop(); // override;
 
+signals:
+  void onNewPriceAvailable(QString const &tokenName,
+                           double const,
+                           korrelator::exchange_name_e const,
+                           korrelator::trade_type_e const);
 private:
   custom_socket *shared_from_this() { return this; }
   void interpretGenericMessages();
@@ -72,7 +75,6 @@ private:
   std::string const m_port;
   net::io_context &m_ioContext;
   net::ssl::context &m_sslContext;
-  token_proxy_iter &m_tokenProxyIter;
   internal_address_t m_tokenName;
   std::optional<resolver> m_resolver = std::nullopt;
   std::optional<beast::websocket::stream<beast::ssl_stream<beast::tcp_stream>>>
@@ -86,23 +88,34 @@ double binanceGetCoinPrice(char const *str, size_t const size);
 
 } // namespace detail
 
-class cwebsocket {
+using socket_variant = std::variant<detail::custom_socket*, kc_websocket*>;
+
+class cwebsocket: public QObject {
+  Q_OBJECT
+
   struct exchange_trade_pair {
     trade_type_e tradeType;
     QString tokenName;
   };
 
 public:
-  void addSubscription(token_proxy_iter &iter);
+  void addSubscription(QString const &tokenName, trade_type_e const tradeType,
+                       exchange_name_e const exchange);
   void startWatch();
 
   cwebsocket();
   ~cwebsocket();
 
+signals:
+  void onNewPriceAvailable(QString const &tokenName,
+                           double const,
+                           korrelator::exchange_name_e const,
+                           korrelator::trade_type_e const);
+
 private:
   net::ssl::context &m_sslContext;
   net::io_context *m_ioContext = nullptr;
-  std::vector<std::shared_ptr<websocket_base>> m_sockets;
+  std::vector<socket_variant> m_sockets;
   std::map<exchange_name_e, std::vector<exchange_trade_pair>> m_checker;
 };
 

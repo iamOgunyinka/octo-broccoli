@@ -9,12 +9,11 @@
 #include <boost/beast/websocket/stream.hpp>
 
 #include <QString>
-
+#include <QObject>
 #include <optional>
 
-#include "tokens.hpp"
+#include "utils.hpp"
 #include "uri.hpp"
-#include "websocket_base.hpp"
 
 namespace net = boost::asio;
 namespace ssl = net::ssl;
@@ -32,19 +31,25 @@ struct instance_server_data_t {
 };
 
 // kucoin websocket
-class kc_websocket : public websocket_base {
+class kc_websocket : public QObject {
 
+  Q_OBJECT
   using resolver = ip::tcp::resolver;
   using results_type = resolver::results_type;
 
 public:
   kc_websocket(net::io_context &ioContext, ssl::context &sslContext,
-               token_proxy_iter &tokenIter);
+               trade_type_e const);
   ~kc_websocket();
-  void addSubscription(std::string const &) override;
-  void startFetching() override { restApiInitiateConnection(); }
-  void requestStop() override { m_requestedToStop = true; }
+  void addSubscription(QString const &);// override;
+  void startFetching()/* override */{ restApiInitiateConnection(); }
+  void requestStop() /*override */{ m_requestedToStop = true; }
 
+signals:
+  void onNewPriceAvailable(QString const &tokenName,
+                           double const,
+                           korrelator::exchange_name_e const,
+                           korrelator::trade_type_e const);
 private:
   void restApiSendRequest();
   void restApiReceiveResponse();
@@ -65,7 +70,6 @@ private:
 
   net::io_context &m_ioContext;
   ssl::context &m_sslContext;
-  token_proxy_iter &m_tokenProxyIter;
   std::optional<resolver> m_resolver;
   std::optional<ws::stream<beast::ssl_stream<beast::tcp_stream>>>
       m_sslWebStream;
@@ -74,8 +78,9 @@ private:
   std::vector<instance_server_data_t> m_instanceServers;
   std::string m_websocketToken;
   std::string m_subscriptionString;
-  std::string m_tokenList;
+  QString m_tokenList;
   korrelator::uri m_uri;
+  trade_type_e const m_tradeType;
   bool const m_isSpotTrade;
   bool m_tokensSubscribedFor = false;
   bool m_requestedToStop = false;

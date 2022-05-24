@@ -33,7 +33,6 @@ HEADERS += \
   include/qcustomplot.h \
   include/sthread.hpp \
   include/uri.hpp \
-  include/websocket_base.hpp \
   include/utils.hpp \
   include/tokens.hpp
 

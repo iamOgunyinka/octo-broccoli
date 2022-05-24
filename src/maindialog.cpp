@@ -53,6 +53,21 @@ korrelator::exchange_name_e stringToExchangeName(QString const &name) {
   return korrelator::exchange_name_e::none;
 }
 
+void updateTokenIter(token_list_t::iterator iter, double const price) {
+  auto &value = *iter;
+  if (value.calculatingNewMinMax) {
+    value.minPrice = price * 0.75;
+    value.maxPrice = price * 1.25;
+    value.calculatingNewMinMax = false;
+  }
+
+  value.minPrice = std::min(value.minPrice, price);
+  value.maxPrice = std::max(value.maxPrice, price);
+  value.normalizedPrice =
+      (price - value.minPrice) / (value.maxPrice - value.minPrice);
+  value.realPrice = price;
+}
+
 QSslConfiguration getSSLConfig() {
   auto ssl_config = QSslConfiguration::defaultConfiguration();
   ssl_config.setProtocol(QSsl::TlsV1_2OrLater);
@@ -91,6 +106,8 @@ MainDialog::MainDialog(QWidget *parent)
 
   qRegisterMetaType<korrelator::model_data_t>();
   qRegisterMetaType<korrelator::cross_over_data_t>();
+  qRegisterMetaType<korrelator::exchange_name_e>();
+  qRegisterMetaType<korrelator::trade_type_e>();
 
   setWindowIcon(qApp->style()->standardPixmap(QStyle::SP_DesktopIcon));
   setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint |
@@ -361,7 +378,7 @@ void MainDialog::newItemAdded(QString const &tokenName, trade_type_e const tt,
       token.tokenName = "*";
       token.calculatingNewMinMax = true;
       token.tradeType = tt;
-      token.setNormalizedPriceNoRace(maxDoubleValue);
+      token.normalizedPrice = maxDoubleValue;
       m_tokens.push_back(std::move(token));
     }
 
@@ -370,7 +387,6 @@ void MainDialog::newItemAdded(QString const &tokenName, trade_type_e const tt,
       token.tradeType = tt;
       token.tokenName = tokenName;
       token.calculatingNewMinMax = true;
-      token.isReferenceType = true;
       token.tradeType = tt;
       token.exchange = exchange;
       m_refs.push_back(std::move(token));
@@ -380,7 +396,6 @@ void MainDialog::newItemAdded(QString const &tokenName, trade_type_e const tt,
       korrelator::token_t token;
       token.tokenName = tokenName;
       token.calculatingNewMinMax = true;
-      token.isReferenceType = false;
       token.tradeType = tt;
       token.exchange = exchange;
       m_tokens.push_back(std::move(token));
@@ -612,15 +627,18 @@ void MainDialog::sendNetworkRequest(QUrl const &url,
           return cb({}, exchange);
 
         tokenList.reserve(list.size());
-        for (auto const &token : list) {
-          auto const tokenObject = token.toObject();
+        for (int i = 0; i < list.size(); ++i) {
+          auto const tokenObject = list[i].toObject();
           korrelator::token_t t;
           t.tokenName = tokenObject.value("symbol").toString().toLower();
-          if (isKuCoin && !tokenObject.contains(key))
-            t.setNormalizedPriceNoRace(
-                tokenObject.value(key2).toString().toDouble());
-          t.setNormalizedPriceNoRace(
-              tokenObject.value(key).toString().toDouble());
+          if (isKuCoin && !tokenObject.contains(key)) {
+            if (auto const f = tokenObject.value(key2); f.isString())
+              t.realPrice = f.toString().toDouble();
+            else
+              t.realPrice = f.toDouble();
+          }
+          else
+            t.realPrice = tokenObject.value(key).toString().toDouble();
           t.exchange = exchange;
           t.tradeType = tradeType;
           tokenList.push_back(std::move(t));
@@ -724,16 +742,15 @@ void MainDialog::setupGraphData() {
 void MainDialog::getInitialTokenPrices() {
   static size_t numberOfRecursions = 0;
 
-  auto normalizePrice = [](auto &list, auto const &result, auto const tt) {
+  auto normalizePrice = [this](auto &list, auto &result, auto const tt) {
     for (auto listIter = list.begin(); listIter != list.end(); ++listIter) {
       auto &value = *listIter;
       if (value.tradeType != tt || value.tokenName.size() == 1)
         continue;
-      auto iter = std::lower_bound(result.begin(), result.end(), value,
-                                   korrelator::token_compare_t{});
+      auto iter = find(result, value.tokenName, value.tradeType, value.exchange);
       if (iter != result.end()) {
         listIter->calculatingNewMinMax = true;
-        updateTokenIter(listIter, iter->getNormalizedPrice());
+        updateTokenIter(listIter, iter->realPrice);
       }
     }
   };
@@ -747,9 +764,8 @@ void MainDialog::getInitialTokenPrices() {
       if (m_hasReferences) {
         auto price = 0.0;
         for (auto const &t : m_refs)
-          price += t.getNormalizedPrice();
-        m_refIterator->setNormalizedPriceNoRace(
-            (price / (double)m_refs.size()));
+          price += t.normalizedPrice;
+        m_refIterator->normalizedPrice = (price / (double)m_refs.size());
       }
       // after successfully getting the SPOTs and FUTURES' prices,
       // start the websocket and get real-time updates.
@@ -760,6 +776,9 @@ void MainDialog::getInitialTokenPrices() {
   std::set<exchange_name_e> exchanges;
   for (auto &t : m_refs)
     exchanges.insert(t.exchange);
+  for (auto &t: m_tokens)
+    if (t.exchange != exchange_name_e::none)
+      exchanges.insert(t.exchange);
 
   numberOfRecursions = 2 * exchanges.size();
 
@@ -822,6 +841,9 @@ void MainDialog::setupOrderTableModel() {
 }
 
 void MainDialog::onOKButtonClicked() {
+  if (ui->tokenListWidget->count() == 0)
+    return;
+
   if (m_programIsRunning)
     return stopGraphPlotting();
 
@@ -850,24 +872,42 @@ void MainDialog::onOKButtonClicked() {
   getInitialTokenPrices();
 }
 
+void MainDialog::onNewPriceReceived(QString const &tokenName,
+                                    double const price,
+                                    exchange_name_e const exchange,
+                                    trade_type_e const tt) {
+  auto iter = find(m_tokens, tokenName, tt, exchange);
+  if (iter != m_tokens.end()) {
+    std::lock_guard<std::mutex> lock_g{m_mutex};
+    updateTokenIter(iter, price);
+  }
+
+  iter = find(m_refs, tokenName, tt, exchange);
+  if (iter != m_refs.end()) {
+    std::lock_guard<std::mutex> lock_g{m_mutex};
+    updateTokenIter(iter, price);
+  }
+}
+
 void MainDialog::startWebsocket() {
   // price updater
   m_priceUpdater.worker = std::make_unique<korrelator::Worker>([this] {
     m_websocket = std::make_unique<korrelator::cwebsocket>();
-    m_tokenProxies.clear();
 
-    for (auto iter = m_refs.begin(); iter != m_refs.end(); ++iter)
-      m_tokenProxies.push_back(
-          std::make_unique<korrelator::token_proxy_iter>(iter));
-
-    for (auto iter = m_tokens.begin(); iter != m_tokens.end(); ++iter) {
-      if (iter->tokenName.size() != 1)
-        m_tokenProxies.push_back(
-            std::make_unique<korrelator::token_proxy_iter>(iter));
+    for (auto const &tokenInfo : m_refs) {
+      m_websocket->addSubscription(tokenInfo.tokenName, tokenInfo.tradeType,
+                                   tokenInfo.exchange);
     }
 
-    for (auto &a : m_tokenProxies)
-      m_websocket->addSubscription(*a);
+    for (auto const &tokenInfo : m_tokens) {
+      if (tokenInfo.tokenName.size() != 1)
+        m_websocket->addSubscription(tokenInfo.tokenName, tokenInfo.tradeType,
+                                     tokenInfo.exchange);
+    }
+
+    QObject::connect(m_websocket.get(),
+                     &korrelator::cwebsocket::onNewPriceAvailable, this,
+                     &MainDialog::onNewPriceReceived);
     m_websocket->startWatch();
   });
 
@@ -917,12 +957,12 @@ void calculateGraphMinMax(korrelator::token_t &value, QCPRange const &range,
       value.graph->getValueRange(foundInRange, QCP::sdBoth, range);
   if (foundInRange) {
     minValue = std::min(std::min(minValue, visibleValueRange.lower),
-                        value.getNormalizedPrice());
+                        value.normalizedPrice);
     maxValue = std::max(std::max(maxValue, visibleValueRange.upper),
-                        value.getNormalizedPrice());
+                        value.normalizedPrice);
   } else {
-    minValue = std::min(minValue, value.getNormalizedPrice());
-    maxValue = std::max(maxValue, value.getNormalizedPrice());
+    minValue = std::min(minValue, value.normalizedPrice);
+    maxValue = std::max(maxValue, value.normalizedPrice);
   }
 }
 
@@ -952,17 +992,12 @@ MainDialog::updateRefGraph(double const keyStart, double const keyEnd,
     value.graphPointsDrawnCount = 0;
 
   // get the normalizedValue
-  value.setNormalizedPriceNoRace(0.0);
-  for (auto const &v : m_tokenProxies) {
-    auto const &tempValue = v->value();
-    if (tempValue.isReferenceType)
-      value.setNormalizedPriceNoRace(value.getNormalizedPrice() +
-                                     tempValue.getNormalizedPrice());
-  }
-  value.setNormalizedPriceNoRace(value.getNormalizedPrice() /
-                                 ((double)m_refs.size()));
-  m_refIterator->setNormalizedPriceNoRace(value.getNormalizedPrice() *
-                                          m_refIterator->alpha);
+  value.normalizedPrice = 0.0;
+  for (auto const &v : m_refs)
+    value.normalizedPrice += v.normalizedPrice;
+
+  value.normalizedPrice /= ((double)m_refs.size());
+  m_refIterator->normalizedPrice = value.normalizedPrice * m_refIterator->alpha;
 
   if (updatingMinMax) {
     QCPRange const range(keyStart, keyEnd);
@@ -972,7 +1007,7 @@ MainDialog::updateRefGraph(double const keyStart, double const keyEnd,
   value.prevNormalizedPrice = value.prevNormalizedPrice;
   value.graph->setName(
       QString("%1(%2)").arg(value.legendName).arg(value.graphPointsDrawnCount));
-  value.graph->addData(keyEnd, value.getNormalizedPrice());
+  value.graph->addData(keyEnd, value.normalizedPrice);
   return refResult;
 }
 
@@ -986,7 +1021,7 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
       (key >= korrelator::maxVisiblePlot ? (key - korrelator::maxVisiblePlot)
                                          : 0.0);
   double const prevRef =
-      (m_hasReferences) ? m_refIterator->getNormalizedPrice() : maxDoubleValue;
+      (m_hasReferences) ? m_refIterator->normalizedPrice : maxDoubleValue;
 
   std::lock_guard<std::mutex> lock_g{m_mutex};
   bool isResettingSymbols = false;
@@ -995,17 +1030,15 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   auto refResult = (!m_hasReferences)
                        ? korrelator::ref_calculation_data_t()
                        : updateRefGraph(keyStart, key, updatingMinMax);
-  double currentRef = m_refIterator->getNormalizedPrice();
+  double currentRef = m_refIterator->normalizedPrice;
 
   // update the real symbols
-  for (auto &v : m_tokenProxies) {
-    auto &value = v->value();
-    if (value.isReferenceType)
-      continue;
+  for (int i = 1; i < m_tokens.size(); ++i) {
+    auto &value = m_tokens[i];
 
     ++value.graphPointsDrawnCount;
     if (value.prevNormalizedPrice == maxDoubleValue)
-      value.prevNormalizedPrice = value.getNormalizedPrice();
+      value.prevNormalizedPrice = value.normalizedPrice;
 
     isResettingSymbols =
         !m_findingSpecialRef && korrelator::restartTickValues[0].has_value() &&
@@ -1015,14 +1048,12 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     if (isResettingSymbols)
       value.graphPointsDrawnCount = 0;
 
-    auto const crossOverDecision =
-        lineCrossedOver(prevRef, currentRef, value.prevNormalizedPrice,
-                        value.getNormalizedPrice());
-    auto const realPrice = v->getRealPrice();
+    auto const crossOverDecision = lineCrossedOver(
+        prevRef, currentRef, value.prevNormalizedPrice, value.normalizedPrice);
 
     if (crossOverDecision != trade_action_e::do_nothing) {
       auto &crossOver = value.crossOver.emplace();
-      crossOver.price = realPrice;
+      crossOver.price = value.realPrice;
       crossOver.action = crossOverDecision;
       crossOver.time =
           QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
@@ -1033,9 +1064,9 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
       double amp = 0.0;
       auto &crossOverValue = *value.crossOver;
       if (crossOverValue.action == trade_action_e::buy)
-        amp = (value.getNormalizedPrice() / currentRef) - 1.0;
+        amp = (value.normalizedPrice / currentRef) - 1.0;
       else
-        amp = (currentRef / value.getNormalizedPrice()) - 1.0;
+        amp = (currentRef / value.normalizedPrice) - 1.0;
 
       if (m_findingUmbral && amp >= m_threshold) {
         korrelator::model_data_t data;
@@ -1043,7 +1074,7 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
             (value.tradeType == korrelator::trade_type_e::spot ? "SPOT"
                                                                : "FUTURES");
         data.signalPrice = crossOverValue.price;
-        data.openPrice = realPrice;
+        data.openPrice = value.realPrice;
         data.side = actionTypeToString(value.crossOver->action);
         data.symbol = value.tokenName;
         data.openTime =
@@ -1060,13 +1091,13 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
 
     if (refResult.eachTickNormalize) {
       currentRef /= m_refIterator->alpha;
-      auto const normalizedPrice = value.getNormalizedPrice();
       auto const distanceFromRefToSymbol = // a
-          ((normalizedPrice > currentRef) ? (normalizedPrice / currentRef)
-                                          : (currentRef / normalizedPrice)) -
+          ((value.normalizedPrice > currentRef)
+               ? (value.normalizedPrice / currentRef)
+               : (currentRef / value.normalizedPrice)) -
           1.0;
       auto const distanceThreshold = m_specialRef; // b
-      if (normalizedPrice > currentRef) {
+      if (value.normalizedPrice > currentRef) {
         m_refIterator->alpha =
             ((distanceFromRefToSymbol + 1) / (distanceThreshold + 1.0));
       } else {
@@ -1081,11 +1112,11 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
                            refResult.maxValue);
     }
 
-    value.prevNormalizedPrice = value.getNormalizedPrice();
+    value.prevNormalizedPrice = value.normalizedPrice;
     value.graph->setName(QString(legendDisplayFormat)
                              .arg(value.legendName)
                              .arg(value.graphPointsDrawnCount));
-    value.graph->addData(key, value.getNormalizedPrice());
+    value.graph->addData(key, value.normalizedPrice);
   } // end for
 
   if (refResult.isResettingRef || isResettingSymbols)
