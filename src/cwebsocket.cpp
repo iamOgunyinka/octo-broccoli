@@ -2,26 +2,22 @@
 #include <QDebug>
 #include <QThread>
 
-#include <rapidjson/document.h>
 #include "kc_websocket.hpp"
+#include <rapidjson/document.h>
 
 namespace korrelator {
 
 namespace detail {
-char const * const custom_socket::futures_url =
-    "fstream.binance.com";
-char const * const custom_socket::spot_url =
-    "stream.binance.com";
-char const * const custom_socket::spot_port = "9443";
-char const * const custom_socket::futures_port = "443";
-
+char const *const custom_socket::futures_url = "fstream.binance.com";
+char const *const custom_socket::spot_url = "stream.binance.com";
+char const *const custom_socket::spot_port = "9443";
+char const *const custom_socket::futures_port = "443";
 
 custom_socket::~custom_socket() {
   m_resolver.reset();
   m_sslWebStream.reset();
   m_readBuffer.reset();
   m_writeBuffer.clear();
-  qDebug() << "Destroyed";
 }
 
 void custom_socket::startFetching() {
@@ -29,14 +25,16 @@ void custom_socket::startFetching() {
     return;
 
   m_resolver.emplace(m_ioContext);
-  m_resolver->async_resolve(m_host, m_port,
-        [self = shared_from_this()](auto const error_code, results_type const &results) {
-    if (error_code) {
-      qDebug() << error_code.message().c_str();
-      return;
-    }
-    self->websockConnectToResolvedNames(results);
-  });
+  m_resolver->async_resolve(
+      m_host, m_port,
+      [self = shared_from_this()](auto const error_code,
+                                  results_type const &results) {
+        if (error_code) {
+          qDebug() << error_code.message().c_str();
+          return;
+        }
+        self->websockConnectToResolvedNames(results);
+      });
 }
 
 void custom_socket::websockConnectToResolvedNames(
@@ -46,21 +44,21 @@ void custom_socket::websockConnectToResolvedNames(
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(30));
   beast::get_lowest_layer(*m_sslWebStream)
-      .async_connect(resolvedNames,
-                     [self = shared_from_this()](auto const &errorCode,
-                     resolver_result_type::endpoint_type const &connectedName)
-  {
-    if (errorCode) {
-      qDebug() << errorCode.message().c_str();
-      return;
-    }
-    self->websockPerformSslHandshake(connectedName);
-  });
+      .async_connect(
+          resolvedNames,
+          [self = shared_from_this()](
+              auto const &errorCode,
+              resolver_result_type::endpoint_type const &connectedName) {
+            if (errorCode) {
+              qDebug() << errorCode.message().c_str();
+              return;
+            }
+            self->websockPerformSslHandshake(connectedName);
+          });
 }
 
 void custom_socket::websockPerformSslHandshake(
-    resolver_result_type::endpoint_type const &endpoint)
-{
+    resolver_result_type::endpoint_type const &endpoint) {
   auto const host = m_host + ":" + std::to_string(endpoint.port());
 
   // Set a timeout on the operation
@@ -80,16 +78,15 @@ void custom_socket::websockPerformSslHandshake(
 
 void custom_socket::negotiateWebsocketConnection() {
   m_sslWebStream->next_layer().async_handshake(
-        net::ssl::stream_base::client,
-        [self = shared_from_this()](beast::error_code const ec)
-  {
-    if (ec) {
-      qDebug() << ec.message().c_str();
-      return;
-    }
-    beast::get_lowest_layer(*self->m_sslWebStream).expires_never();
-    self->performWebsocketHandshake();
-  });
+      net::ssl::stream_base::client,
+      [self = shared_from_this()](beast::error_code const ec) {
+        if (ec) {
+          qDebug() << ec.message().c_str();
+          return;
+        }
+        beast::get_lowest_layer(*self->m_sslWebStream).expires_never();
+        self->performWebsocketHandshake();
+      });
 }
 
 void custom_socket::performWebsocketHandshake() {
@@ -102,52 +99,51 @@ void custom_socket::performWebsocketHandshake() {
   m_sslWebStream->set_option(opt);
 
   m_sslWebStream->control_callback(
-        [self = shared_from_this()](auto const frame_type, auto const &) {
-    if (frame_type == beast::websocket::frame_type::close) {
-      self->m_sslWebStream.reset();
-      return self->startFetching();
-    }
-  });
+      [self = shared_from_this()](auto const frame_type, auto const &) {
+        if (frame_type == beast::websocket::frame_type::close) {
+          self->m_sslWebStream.reset();
+          return self->startFetching();
+        }
+      });
 
   m_sslWebStream->async_handshake(
-        m_host, urlPath, [self = shared_from_this()](beast::error_code const ec) {
-    if (ec) {
-      qDebug() << ec.message().c_str();
-      return;
-    }
+      m_host, urlPath, [self = shared_from_this()](beast::error_code const ec) {
+        if (ec) {
+          qDebug() << ec.message().c_str();
+          return;
+        }
 
-    self->waitForMessages();
-  });
+        self->waitForMessages();
+      });
 }
 
 void custom_socket::waitForMessages() {
   m_readBuffer.emplace();
   m_sslWebStream->async_read(
-       *m_readBuffer,
-        [self = shared_from_this()](beast::error_code const error_code, std::size_t const) {
-         if (error_code == net::error::operation_aborted) {
-           qDebug() << error_code.message().c_str();
-           return;
-         } else if (error_code) {
-           qDebug() << error_code.message().c_str();
-           self->m_sslWebStream.reset();
-           return self->startFetching();
-         }
-         self->interpretGenericMessages();
-       });
- }
+      *m_readBuffer,
+      [self = shared_from_this()](beast::error_code const error_code,
+                                  std::size_t const) {
+        if (error_code == net::error::operation_aborted) {
+          qDebug() << error_code.message().c_str();
+          return;
+        } else if (error_code) {
+          qDebug() << error_code.message().c_str();
+          self->m_sslWebStream.reset();
+          return self->startFetching();
+        }
+        self->interpretGenericMessages();
+      });
+}
 
 void custom_socket::interpretGenericMessages() {
   if (m_requestedToStop)
     return;
 
-  char const *buffer_cstr = static_cast<char const *>(
-        m_readBuffer->cdata().data());
-  auto const optMessage = binanceGetCoinPrice(buffer_cstr, m_readBuffer->size());
-  if (optMessage) {
-    auto& value = *optMessage;
-    m_onNewPriceCallback(value.first, value.second, m_tradeType);
-  }
+  char const *bufferCstr =
+      static_cast<char const *>(m_readBuffer->cdata().data());
+  auto const optPrice = binanceGetCoinPrice(bufferCstr, m_readBuffer->size());
+  if (!isnan(optPrice))
+    m_tokenProxyIter.setRealPrice(optPrice);
 
   if (!m_tokenName.subscribed)
     return makeSubscription();
@@ -167,29 +163,25 @@ void custom_socket::makeSubscription() {
     })").arg(m_tokenName.tokenName.c_str()).toStdString();
 
   m_sslWebStream->async_write(
-        net::buffer(m_writeBuffer),
-        [self = shared_from_this()](auto const errCode, size_t const)
-  {
-    if (errCode) {
-      qDebug() << errCode.message().c_str();
-      return;
-    }
-    self->m_writeBuffer.clear();
-    self->m_tokenName.subscribed = true;
-    self->waitForMessages();
-  });
+      net::buffer(m_writeBuffer),
+      [self = shared_from_this()](auto const errCode, size_t const) {
+        if (errCode) {
+          qDebug() << errCode.message().c_str();
+          return;
+        }
+        self->m_writeBuffer.clear();
+        self->m_tokenName.subscribed = true;
+        self->waitForMessages();
+      });
 }
 
-void custom_socket::requestStop() {
-  m_requestedToStop = true;
-}
+void custom_socket::requestStop() { m_requestedToStop = true; }
 
 #ifdef _MSC_VER
 #undef GetObject
 #endif
 
-std::optional<std::pair<QString, double>> binanceGetCoinPrice(
-    char const* str, size_t const size) {
+double binanceGetCoinPrice(char const *str, size_t const size) {
   rapidjson::Document d;
   d.Parse(str, size);
 
@@ -197,52 +189,50 @@ std::optional<std::pair<QString, double>> binanceGetCoinPrice(
     auto const jsonObject = d.GetObject();
     auto iter = jsonObject.FindMember("data");
     if (iter == jsonObject.end())
-      return std::nullopt;
+      return NAN;
     auto const dataObject = iter->value.GetObject();
     auto const typeIter = dataObject.FindMember("e");
     if (typeIter == dataObject.MemberEnd()) {
       Q_ASSERT(false);
-      return std::nullopt;
+      return NAN;
     }
 
     std::string const type = typeIter->value.GetString();
-    bool const is24HrTicker = type.length() == 10 && type[0] == '2' &&
-        type.back() == 'r';
+    bool const is24HrTicker =
+        type.length() == 10 && type[0] == '2' && type.back() == 'r';
     bool const isAggregateTrade = type.length() == 8 && type[0] == 'a' &&
-        type[3] == 'T' && type.back() == 'e';
-
+                                  type[3] == 'T' && type.back() == 'e';
     if (is24HrTicker || isAggregateTrade) {
-      char const * amountStr = isAggregateTrade ? "p" : "c";
-      QString const tokenName = dataObject.FindMember("s")->value.GetString();
+      char const *amountStr = isAggregateTrade ? "p" : "c";
       auto const amount =
           std::atof(dataObject.FindMember(amountStr)->value.GetString());
-      return std::make_pair(tokenName.toLower(), amount);
+      return amount;
     }
-  } catch(...) {
-    return std::nullopt;
+  } catch (...) {
+    return NAN;
   }
-  return std::nullopt;
+  return NAN;
 }
 
-std::unique_ptr<net::io_context>& getRawIOContext() {
+std::unique_ptr<net::io_context> &getRawIOContext() {
   static std::unique_ptr<net::io_context> ioContext = nullptr;
   return ioContext;
 }
 
-net::io_context* getIOContext() {
-  auto& ioContext = getRawIOContext();
+net::io_context *getIOContext() {
+  auto &ioContext = getRawIOContext();
   if (!ioContext) {
-    ioContext = std::make_unique<net::io_context>(
-    std::thread::hardware_concurrency());
+    ioContext =
+        std::make_unique<net::io_context>(std::thread::hardware_concurrency());
   }
   return ioContext.get();
 }
 
-
-net::ssl::context& getSSLContext() {
+net::ssl::context &getSSLContext() {
   static std::unique_ptr<net::ssl::context> ssl_context = nullptr;
   if (!ssl_context) {
-    ssl_context = std::make_unique<net::ssl::context>(net::ssl::context::tlsv12_client);
+    ssl_context =
+        std::make_unique<net::ssl::context>(net::ssl::context::tlsv12_client);
     ssl_context->set_default_verify_paths();
     ssl_context->set_verify_mode(boost::asio::ssl::verify_none);
   }
@@ -251,10 +241,7 @@ net::ssl::context& getSSLContext() {
 
 } // namespace detail
 
-cwebsocket::cwebsocket(price_callback priceCallback)
-  : m_sslContext(detail::getSSLContext())
-  , m_onNewCallback(std::move(priceCallback))
-{
+cwebsocket::cwebsocket() : m_sslContext(detail::getSSLContext()) {
   detail::getRawIOContext().reset();
   m_ioContext = detail::getIOContext();
 }
@@ -262,44 +249,63 @@ cwebsocket::cwebsocket(price_callback priceCallback)
 cwebsocket::~cwebsocket() {
   m_ioContext->stop();
 
-  for(auto& sock: m_sockets)
+  for (auto &sock : m_sockets)
     sock->requestStop();
 
   m_sockets.clear();
 }
 
-void cwebsocket::addSubscription(
-    QString const &tokenName, trade_type_e const tt,
-    exchange_name_e const exchange)
-{
-  auto iter = m_checker.find(tokenName);
-  if (iter != m_checker.end() &&
-      iter->second.tradeType == tt &&
-      iter->second.exchange == exchange)
-    return;
-  m_checker[tokenName].tradeType = tt;
-  m_checker[tokenName].exchange = exchange;
+void cwebsocket::addSubscription(token_proxy_iter &tokenIter) {
+  auto const &tokenName = tokenIter.value().tokenName;
+  auto const tradeType = tokenIter.tradeType();
+  auto const exchange = tokenIter.exchange();
+
+  auto iter = m_checker.find(exchange);
+  if (iter != m_checker.end()) {
+    auto iter2 = std::find_if(
+        iter->second.begin(), iter->second.end(),
+        [tradeType, tokenName](auto const &a) {
+          return a.tokenName.compare(tokenName, Qt::CaseInsensitive) == 0 &&
+                 tradeType == a.tradeType;
+        });
+    if (iter2 != iter->second.end())
+      return;
+    iter->second.push_back({tradeType, tokenName});
+  } else {
+    m_checker[exchange].push_back({tradeType, tokenName});
+  }
 
   if (exchange == exchange_name_e::binance) {
-    m_sockets.push_back(
-          std::make_shared<detail::custom_socket>(
-            *m_ioContext, m_sslContext, tokenName.toLower().toStdString(),
-            m_onNewCallback, tt));
+    m_sockets.push_back(std::make_shared<detail::custom_socket>(
+        *m_ioContext, m_sslContext, tokenIter));
+    m_sockets.back()->addSubscription(tokenName.toLower().toStdString());
   } else if (exchange == exchange_name_e::kucoin) {
     m_sockets.push_back(
-          std::make_shared<kc_websocket>(*m_ioContext, m_sslContext, tt));
+        std::make_shared<kc_websocket>(*m_ioContext, m_sslContext, tokenIter));
+    m_sockets.back()->addSubscription(tokenName.toUpper().toStdString());
   }
 }
 
 void cwebsocket::startWatch() {
   m_checker.clear();
 
-  for (auto& sock: m_sockets) {
-    std::thread([&sock, this]{
+  for (auto &sock : m_sockets) {
+    std::thread([&sock, this] {
       sock->startFetching();
       m_ioContext->run();
     }).detach();
   }
 }
 
+void updateTokenIter(token_list_t::iterator iter, double const price) {
+  auto &value = *iter;
+  if (value.calculatingNewMinMax) {
+    value.minPrice = price * 0.75;
+    value.maxPrice = price * 1.25;
+    value.calculatingNewMinMax = false;
+  }
+
+  value.minPrice = std::min(value.minPrice, price);
+  value.maxPrice = std::max(value.maxPrice, price);
+}
 } // namespace korrelator

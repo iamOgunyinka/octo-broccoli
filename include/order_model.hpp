@@ -16,27 +16,29 @@ struct model_data_t {
   double openPrice;
 };
 
-class order_model : public QAbstractTableModel
-{
+class order_model : public QAbstractTableModel {
   Q_OBJECT
 
 public:
   explicit order_model(QObject *parent = nullptr);
 
   // Header:
-  QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
-  Qt::ItemFlags flags( QModelIndex const &index ) const override;
+  QVariant headerData(int section, Qt::Orientation orientation,
+                      int role = Qt::DisplayRole) const override;
+  Qt::ItemFlags flags(QModelIndex const &index) const override;
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   int columnCount(const QModelIndex &parent = QModelIndex()) const override;
-  QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+  QVariant data(const QModelIndex &index,
+                int role = Qt::DisplayRole) const override;
 
-  bool insertRows(int row, int count, const QModelIndex &parent = QModelIndex()) override;
+  bool insertRows(int row, int count,
+                  const QModelIndex &parent = QModelIndex()) override;
   void AddData(model_data_t &&);
 
 private:
   std::deque<model_data_t> m_modelData;
 };
 
-}
+} // namespace korrelator
 
 Q_DECLARE_METATYPE(korrelator::model_data_t);

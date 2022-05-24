@@ -25,6 +25,7 @@ SOURCES += main.cpp \
   src/uri.cpp
 
 HEADERS += \
+  include/container.hpp \
   include/cwebsocket.hpp \
   include/kc_websocket.hpp \
   include/maindialog.hpp \
@@ -33,7 +34,8 @@ HEADERS += \
   include/sthread.hpp \
   include/uri.hpp \
   include/websocket_base.hpp \
-  utils.hpp
+  include/utils.hpp \
+  include/tokens.hpp
 
 FORMS += \
     ui/maindialog.ui

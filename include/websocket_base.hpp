@@ -4,8 +4,7 @@
 
 namespace korrelator {
 
-class websocket_base
-{
+class websocket_base {
 public:
   virtual ~websocket_base() = default;
   virtual void addSubscription(std::string const &) = 0;
@@ -13,5 +12,4 @@ public:
   virtual void requestStop() = 0;
 };
 
-}
-
+} // namespace korrelator

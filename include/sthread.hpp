@@ -32,4 +32,4 @@ struct ThreadCleanup {
 using cthread_ptr = std::unique_ptr<QThread, ThreadCleanup>;
 using worker_ptr = std::unique_ptr<Worker>;
 
-} // namespace shiny_guide
+} // namespace korrelator

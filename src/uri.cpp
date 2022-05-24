@@ -19,7 +19,7 @@ void uri::parse(std::string const &url_s) {
   std::string::const_iterator prot_i =
       std::search(url_s.begin(), url_s.end(), prot_end.begin(), prot_end.end());
   m_protocol.reserve(
-        static_cast<std::size_t>(std::distance(url_s.cbegin(), prot_i)));
+      static_cast<std::size_t>(std::distance(url_s.cbegin(), prot_i)));
   std::transform(url_s.begin(), prot_i, std::back_inserter(m_protocol),
                  [](int c) { return std::tolower(c); });
   if (prot_i == url_s.end()) {
@@ -39,4 +39,4 @@ void uri::parse(std::string const &url_s) {
   m_query.assign(query_i, url_s.end());
 }
 
-}
+} // namespace korrelator

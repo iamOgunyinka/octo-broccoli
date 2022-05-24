@@ -1,76 +1,28 @@
 #pragma once
 
 #include <QDialog>
-#include <QNetworkAccessManager>
 #include <QListWidgetItem>
-#include <QTimer>
 #include <QMetaType>
+#include <QNetworkAccessManager>
+#include <QTimer>
 #include <memory>
 #include <optional>
 
 #include "cwebsocket.hpp"
 #include "order_model.hpp"
 #include "sthread.hpp"
+#include "tokens.hpp"
 
 QT_BEGIN_NAMESPACE
-namespace Ui { class MainDialog; }
+namespace Ui {
+class MainDialog;
+}
 QT_END_NAMESPACE
 
 class QCPGraph;
 class QCPLayoutGrid;
 
 namespace korrelator {
-
-enum class trade_action_e {
-  buy, sell, do_nothing
-};
-
-enum tick_line_type_e {
-  normal, ref, all, special
-};
-
-struct cross_over_data_t {
-  double price = 0.0;
-  trade_action_e action = trade_action_e::do_nothing;
-  QString time;
-  cross_over_data_t() = default;
-};
-
-class token_t {
-public:
-
-  double minPrice = std::numeric_limits<double>::max();
-  double maxPrice = -1 * std::numeric_limits<double>::max();
-  double prevNormalizedPrice = std::numeric_limits<double>::max();
-  double normalizedPrice = 0.0;
-  double realPrice = 0.0;
-  double alpha = 1.0;
-  qint64 graphPointsDrawnCount = 0;
-  std::optional<cross_over_data_t> crossOver;
-  QString tokenName;
-  QString legendName;
-  mutable QCPGraph* graph = nullptr;
-  bool calculatingNewMinMax = true;
-  bool crossedOver = false;
-  trade_type_e tradeType;
-
-  void reset();
-};
-
-using token_map_t = std::map<QString, korrelator::token_t>;
-
-struct token_compare_t {
-  bool operator()(QString const &tokenName, token_t const & t) const {
-    return tokenName < t.tokenName;
-  }
-  bool operator()(token_t const & t, QString const &tokenName) const {
-    return t.tokenName < tokenName;
-  }
-  bool operator()(token_t const & a, token_t const &b) const {
-    return std::tie(a.tokenName, a.tradeType) <
-        std::tie(b.tokenName, b.tradeType);
-  }
-};
 
 struct graph_updater_t {
   worker_ptr worker = nullptr;
@@ -89,32 +41,23 @@ struct ref_calculation_data_t {
   double maxValue = -minValue;
 };
 
-using token_list_t = std::vector<token_t>;
-
-enum class ticker_reset_type_e {
-  non_ref_symbols,
-  ref_symbols,
-  both
-};
+enum class ticker_reset_type_e { non_ref_symbols, ref_symbols, both };
 
 struct watchable_data_t {
   korrelator::token_list_t spots;
   korrelator::token_list_t futures;
-
-  korrelator::token_list_t tokens;
-  korrelator::token_list_t refs;
 };
 
-}
+} // namespace korrelator
 
 using korrelator::exchange_name_e;
+using korrelator::trade_type_e;
 
-class MainDialog : public QDialog
-{
+class MainDialog : public QDialog {
   Q_OBJECT
 
-  using callback_t = std::function<void(korrelator::token_list_t &&,
-                                        exchange_name_e)>;
+  using callback_t =
+      std::function<void(korrelator::token_list_t &&, exchange_name_e)>;
   using list_iterator = korrelator::token_list_t::iterator;
 
 signals:
@@ -128,16 +71,18 @@ public:
 private:
   void getSpotsTokens(exchange_name_e const, callback_t = nullptr);
   void getFuturesTokens(exchange_name_e const, callback_t = nullptr);
-  void sendNetworkRequest(QUrl const &url, callback_t, exchange_name_e const);
-  void newItemAdded(QString const &token, korrelator::trade_type_e const);
+  void sendNetworkRequest(QUrl const &url, callback_t, trade_type_e const,
+                          exchange_name_e const);
+  void newItemAdded(QString const &token, trade_type_e const,
+                    exchange_name_e const);
   void tokenRemoved(QString const &text);
   void onTimerTick();
   void onOKButtonClicked();
   void stopGraphPlotting();
   void saveTokensToFile();
   void readTokensFromFile();
-  void addNewItemToTokenMap(QString const &name, korrelator::trade_type_e const);
-  void attemptFileRead();
+  void addNewItemToTokenMap(QString const &name, trade_type_e const,
+                            exchange_name_e const);
   void enableUIComponents(bool const);
   void resetGraphComponents();
   void setupGraphData();
@@ -147,32 +92,26 @@ private:
   void populateUIComponents();
   void connectAllUISignals();
   bool validateUserInput();
-  void onNewPriceReceived(QString const &, double const price,
-                          korrelator::trade_type_e const tt);
   void generateJsonFile(korrelator::cross_over_data_t const &,
                         korrelator::model_data_t const &);
   void onApplyButtonClicked();
-  int  getTimerTickMilliseconds() const;
-  double getIntegralValue(QLineEdit* lineEdit);
+  int getTimerTickMilliseconds() const;
+  double getIntegralValue(QLineEdit *lineEdit);
   double getMaxPlotsInVisibleRegion() const;
   void updateGraphData(double const key, bool const);
   void setupOrderTableModel();
 
   Qt::Alignment getLegendAlignment() const;
-  list_iterator find(korrelator::token_list_t& container, QString const &,
-                     korrelator::trade_type_e const);
-  list_iterator find(korrelator::token_list_t& container, QString const &);
-  korrelator::trade_action_e lineCrossedOver(
-      double const prevRef, double const currRef,
-      double const prevValue, double const currValue);
-  korrelator::ref_calculation_data_t updateRefGraph(
-      double const keyStart, double const keyEnd, bool const updateGraph);
-
-  QString actionTypeToString(korrelator::trade_action_e a) const {
-    if (a == korrelator::trade_action_e::buy)
-      return "BUY";
-    return "SELL";
-  }
+  list_iterator find(korrelator::token_list_t &container, QString const &,
+                     trade_type_e const, exchange_name_e const);
+  list_iterator find(korrelator::token_list_t &container, QString const &);
+  korrelator::trade_action_e lineCrossedOver(double const prevRef,
+                                             double const currRef,
+                                             double const prevValue,
+                                             double const currValue);
+  korrelator::ref_calculation_data_t updateRefGraph(double const keyStart,
+                                                    double const keyEnd,
+                                                    bool const updateGraph);
 
 private:
   Ui::MainDialog *ui;
@@ -182,7 +121,11 @@ private:
   std::unique_ptr<korrelator::order_model> m_model = nullptr;
 
   QMap<int, korrelator::watchable_data_t> m_watchables;
-  // korrelator::token_list_t::iterator m_refIterator;
+  korrelator::token_list_t m_tokens;
+  korrelator::token_list_t m_refs;
+
+  std::vector<korrelator::token_proxy_iter_ptr> m_tokenProxies;
+  korrelator::token_list_t::iterator m_refIterator;
   std::mutex m_mutex;
 
   korrelator::graph_updater_t m_graphUpdater;
