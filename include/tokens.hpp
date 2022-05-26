@@ -33,7 +33,7 @@ public:
   std::optional<cross_over_data_t> crossOver;
   QString tokenName;
   QString legendName;
-  mutable QCPGraph *graph = nullptr;
+  QCPGraph *graph = nullptr;
   bool calculatingNewMinMax = true;
   bool crossedOver = false;
   trade_type_e tradeType;

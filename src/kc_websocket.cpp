@@ -1,14 +1,19 @@
 #include "kc_websocket.hpp"
-#include <QDebug>
 
+#include <QDebug>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ssl/context.hpp>
 #include <random>
 #include <rapidjson/document.h>
+
+#include "utils.hpp"
 
 #ifdef _MSC_VER
 #undef GetObject
 #endif
 
 namespace korrelator {
+
 static char const *const kc_spot_api_url = "api.kucoin.com";
 static char const *const kc_spot_http_request =
     "POST /api/v1/bullet-public HTTP/1.1\r\n"
@@ -16,8 +21,8 @@ static char const *const kc_spot_http_request =
     "Accept: */*\r\n"
     "Content-Type: application/json\r\n"
     "User-Agent: postman\r\n\r\n";
-static size_t const spot_http_request_len = strlen(kc_spot_http_request);
 
+static size_t const spot_http_request_len = strlen(kc_spot_http_request);
 static char const *const kc_futures_api_url = "api-futures.kucoin.com";
 static char const *const kc_futures_http_request =
     "POST /api/v1/bullet-public HTTP/1.1\r\n"
@@ -37,22 +42,33 @@ double kuCoinGetCoinPrice(char const *str, size_t const size,
   if (iter == jsonObject.end())
     return NAN;
   auto const dataObject = iter->value.GetObject();
-  auto const priceIter = dataObject.FindMember("price");
-  auto const expectedType =
-      isSpot ? rapidjson::Type::kStringType : rapidjson::Type::kNumberType;
-  if (priceIter == dataObject.MemberEnd() ||
-      (priceIter->value.GetType() != expectedType)) {
-    assert(false);
-    return NAN;
-  }
-  if (isSpot)
+  if (isSpot) {
+    auto const priceIter = dataObject.FindMember("price");
+    if (priceIter == dataObject.MemberEnd() ||
+        (priceIter->value.GetType() != rapidjson::Type::kStringType)) {
+      assert(false);
+      return NAN;
+    }
     return std::stod(priceIter->value.GetString());
-  return priceIter->value.GetDouble();
+  } else {
+    auto const bestBidIter = dataObject.FindMember("bestBidPrice");
+    auto const bestAskIter = dataObject.FindMember("bestAskPrice");
+    if (bestBidIter == dataObject.MemberEnd() ||
+        bestAskIter == dataObject.MemberEnd() ||
+        bestBidIter->value.GetType() != rapidjson::Type::kStringType ||
+        bestAskIter->value.GetType() != rapidjson::Type::kStringType) {
+      assert(false);
+      return NAN;
+    }
+    auto const bidPrice = std::stod(bestBidIter->value.GetString());
+    auto const askPrice = std::stod(bestAskIter->value.GetString());
+    return (bidPrice + askPrice) / 2.0;
+  }
+  return NAN;
 }
 
-kc_websocket::kc_websocket(
-    net::io_context &ioContext, ssl::context &sslContext,
-    trade_type_e const tradeType)
+kucoin_ws::kucoin_ws(net::io_context &ioContext, ssl::context &sslContext,
+                     trade_type_e const tradeType)
     : m_ioContext(ioContext)
     , m_sslContext(sslContext)
     , m_tradeType(tradeType)
@@ -60,10 +76,10 @@ kc_websocket::kc_websocket(
 {
 }
 
-kc_websocket::~kc_websocket() {
+kucoin_ws::~kucoin_ws() {
   m_resolver.reset();
   m_sslWebStream.reset();
-  m_readWriteBuffer.reset();
+  resetBuffer();
   m_response.reset();
   m_instanceServers.clear();
   m_websocketToken.clear();
@@ -71,7 +87,7 @@ kc_websocket::~kc_websocket() {
   qDebug() << "KuCoin websocket destroyed";
 }
 
-void kc_websocket::restApiInitiateConnection() {
+void kucoin_ws::restApiInitiateConnection() {
 
   if (m_requestedToStop)
     return;
@@ -92,7 +108,7 @@ void kc_websocket::restApiInitiateConnection() {
       });
 }
 
-void kc_websocket::restApiConnectToResolvedNames(
+void kucoin_ws::restApiConnectToResolvedNames(
     results_type const &resolvedNames) {
   m_resolver.reset();
   m_sslWebStream.emplace(m_ioContext, m_sslContext);
@@ -110,7 +126,7 @@ void kc_websocket::restApiConnectToResolvedNames(
                      });
 }
 
-void kc_websocket::restApiPerformSSLHandshake() {
+void kucoin_ws::restApiPerformSSLHandshake() {
   auto const url = m_isSpotTrade ? kc_spot_api_url : kc_futures_api_url;
 
   beast::get_lowest_layer(*m_sslWebStream)
@@ -133,7 +149,7 @@ void kc_websocket::restApiPerformSSLHandshake() {
       });
 }
 
-void kc_websocket::restApiSendRequest() {
+void kucoin_ws::restApiSendRequest() {
   char const *const request =
       m_isSpotTrade ? kc_spot_http_request : kc_futures_http_request;
   size_t const request_len =
@@ -152,12 +168,12 @@ void kc_websocket::restApiSendRequest() {
       });
 }
 
-void kc_websocket::restApiReceiveResponse() {
-  m_readWriteBuffer.emplace();
+void kucoin_ws::restApiReceiveResponse() {
+  resetBuffer();
   m_response.emplace();
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(20));
-  beast::http::async_read(m_sslWebStream->next_layer(), *m_readWriteBuffer,
+  beast::http::async_read(m_sslWebStream->next_layer(), m_readWriteBuffer,
                           *m_response,
                           [this](auto const errorCode, auto const) {
                             if (errorCode) {
@@ -169,7 +185,7 @@ void kc_websocket::restApiReceiveResponse() {
                           });
 }
 
-void kc_websocket::restApiInterpretHttpResponse() {
+void kucoin_ws::restApiInterpretHttpResponse() {
   rapidjson::Document d;
   auto const &response = m_response->body();
   d.Parse(response.c_str(), response.length());
@@ -218,20 +234,25 @@ void kc_websocket::restApiInterpretHttpResponse() {
   }
 
   m_response.reset();
-  m_readWriteBuffer.reset();
+  resetBuffer();
 
   if (!m_instanceServers.empty() && !m_websocketToken.empty())
     initiateWebsocketConnection();
 }
 
-void kc_websocket::addSubscription(QString const &tokenName) {
+void kucoin_ws::resetBuffer() {
+  m_readWriteBuffer.consume(m_readWriteBuffer.size());
+  m_readWriteBuffer.clear();
+}
+
+void kucoin_ws::addSubscription(QString const &tokenName) {
   if (m_tokenList.isEmpty())
     m_tokenList = tokenName;
   else
     m_tokenList += ("," + tokenName);
 }
 
-void kc_websocket::initiateWebsocketConnection() {
+void kucoin_ws::initiateWebsocketConnection() {
   if (m_instanceServers.empty() || m_websocketToken.empty())
     return;
 
@@ -262,7 +283,7 @@ void kc_websocket::initiateWebsocketConnection() {
       });
 }
 
-void kc_websocket::websockConnectToResolvedNames(
+void kucoin_ws::websockConnectToResolvedNames(
     resolver::results_type const &resolvedNames) {
   m_resolver.reset();
   m_sslWebStream.emplace(m_ioContext, m_sslContext);
@@ -280,7 +301,7 @@ void kc_websocket::websockConnectToResolvedNames(
                      });
 }
 
-void kc_websocket::websockPerformSSLHandshake(
+void kucoin_ws::websockPerformSSLHandshake(
     resolver::results_type::endpoint_type const &ep) {
   auto const host = m_uri.host() + ":" + std::to_string(ep.port());
   beast::get_lowest_layer(*m_sslWebStream)
@@ -296,7 +317,7 @@ void kc_websocket::websockPerformSSLHandshake(
   negotiateWebsocketConnection();
 }
 
-void kc_websocket::negotiateWebsocketConnection() {
+void kucoin_ws::negotiateWebsocketConnection() {
   m_sslWebStream->next_layer().async_handshake(
       ssl::stream_base::client, [this](beast::error_code const &ec) {
         if (ec) {
@@ -308,7 +329,7 @@ void kc_websocket::negotiateWebsocketConnection() {
       });
 }
 
-void kc_websocket::performWebsocketHandshake() {
+void kucoin_ws::performWebsocketHandshake() {
   auto const &instanceData = m_instanceServers.back();
   auto opt = ws::stream_base::timeout();
   opt.idle_timeout = std::chrono::milliseconds(instanceData.pingTimeoutMs);
@@ -317,18 +338,22 @@ void kc_websocket::performWebsocketHandshake() {
   opt.keep_alive_pings = true;
   m_sslWebStream->set_option(opt);
 
-  m_sslWebStream->control_callback([this](auto const frameType, auto const &) {
+  m_sslWebStream->control_callback(
+        [this](beast::websocket::frame_type const frameType,
+               boost::string_view const &payload) {
     if (frameType == ws::frame_type::close) {
       m_sslWebStream.reset();
       return restApiInitiateConnection();
-    } else if (frameType == ws::frame_type::ping ||
-               frameType == ws::frame_type::pong) {
-      qDebug() << (((int)frameType) == 1 ? "ping" : "pong");
+    } else if (frameType == ws::frame_type::pong) {
+      qDebug() << "pong" << QString::fromStdString(payload.to_string());
+    } else if (frameType == ws::frame_type::ping) {
+      qDebug() << "ping" << QString::fromStdString(payload.to_string());
     }
   });
 
   auto const path = m_uri.path() + "?token=" + m_websocketToken +
                     "&connectId=" + get_random_string(10);
+  qDebug() << path.c_str();
   m_sslWebStream->async_handshake(m_uri.host(), path,
                                   [this](auto const errorCode) {
                                     if (errorCode) {
@@ -339,10 +364,11 @@ void kc_websocket::performWebsocketHandshake() {
                                   });
 }
 
-void kc_websocket::waitForMessages() {
-  m_readWriteBuffer.emplace();
+void kucoin_ws::waitForMessages() {
+  // m_readWriteBuffer.emplace();
+  resetBuffer();
   m_sslWebStream->async_read(
-      *m_readWriteBuffer,
+      m_readWriteBuffer,
       [this](beast::error_code const errorCode, std::size_t const) {
         if (errorCode == net::error::operation_aborted) {
           qDebug() << errorCode.message().c_str();
@@ -356,13 +382,13 @@ void kc_websocket::waitForMessages() {
       });
 }
 
-void kc_websocket::interpretGenericMessages() {
+void kucoin_ws::interpretGenericMessages() {
   if (m_requestedToStop)
     return;
 
   char const *bufferCstr =
-      static_cast<char const *>(m_readWriteBuffer->cdata().data());
-  size_t const dataLength = m_readWriteBuffer->size();
+      static_cast<char const *>(m_readWriteBuffer.cdata().data());
+  size_t const dataLength = m_readWriteBuffer.size();
   auto const optPrice =
       kuCoinGetCoinPrice(bufferCstr, dataLength, m_isSpotTrade);
   if (!isnan(optPrice))
@@ -374,7 +400,7 @@ void kc_websocket::interpretGenericMessages() {
   return waitForMessages();
 }
 
-void kc_websocket::makeSubscription() {
+void kucoin_ws::makeSubscription() {
   static char const *const subscriptionFormat = R"({
     "id": %1,
     "type": "subscribe",

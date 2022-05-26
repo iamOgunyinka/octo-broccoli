@@ -1,26 +1,26 @@
-#include "cwebsocket.hpp"
-#include <QDebug>
-#include <QThread>
+#include "binance_websocket.hpp"
 
-#include "kc_websocket.hpp"
+#include <QDebug>
+
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ssl/context.hpp>
+
 #include <rapidjson/document.h>
 
 namespace korrelator {
+char const *const binance_ws::futures_url = "fstream.binance.com";
+char const *const binance_ws::spot_url = "stream.binance.com";
+char const *const binance_ws::spot_port = "9443";
+char const *const binance_ws::futures_port = "443";
 
-namespace detail {
-char const *const custom_socket::futures_url = "fstream.binance.com";
-char const *const custom_socket::spot_url = "stream.binance.com";
-char const *const custom_socket::spot_port = "9443";
-char const *const custom_socket::futures_port = "443";
-
-custom_socket::~custom_socket() {
+binance_ws::~binance_ws() {
   m_resolver.reset();
   m_sslWebStream.reset();
   m_readBuffer.reset();
   m_writeBuffer.clear();
 }
 
-void custom_socket::startFetching() {
+void binance_ws::startFetching() {
   if (m_requestedToStop)
     return;
 
@@ -37,7 +37,7 @@ void custom_socket::startFetching() {
       });
 }
 
-void custom_socket::websockConnectToResolvedNames(
+void binance_ws::websockConnectToResolvedNames(
     resolver_result_type const &resolvedNames) {
   m_resolver.reset();
   m_sslWebStream.emplace(m_ioContext, m_sslContext);
@@ -57,7 +57,7 @@ void custom_socket::websockConnectToResolvedNames(
           });
 }
 
-void custom_socket::websockPerformSslHandshake(
+void binance_ws::websockPerformSslHandshake(
     resolver_result_type::endpoint_type const &endpoint) {
   auto const host = m_host + ":" + std::to_string(endpoint.port());
 
@@ -76,7 +76,7 @@ void custom_socket::websockPerformSslHandshake(
   negotiateWebsocketConnection();
 }
 
-void custom_socket::negotiateWebsocketConnection() {
+void binance_ws::negotiateWebsocketConnection() {
   m_sslWebStream->next_layer().async_handshake(
       net::ssl::stream_base::client,
       [self = shared_from_this()](beast::error_code const ec) {
@@ -89,7 +89,7 @@ void custom_socket::negotiateWebsocketConnection() {
       });
 }
 
-void custom_socket::performWebsocketHandshake() {
+void binance_ws::performWebsocketHandshake() {
   auto const urlPath = "/stream?streams=" + m_tokenName.tokenName + "@aggTrade";
 
   auto opt = beast::websocket::stream_base::timeout();
@@ -118,7 +118,7 @@ void custom_socket::performWebsocketHandshake() {
       });
 }
 
-void custom_socket::waitForMessages() {
+void binance_ws::waitForMessages() {
   m_readBuffer.emplace();
   m_sslWebStream->async_read(
       *m_readBuffer,
@@ -136,7 +136,7 @@ void custom_socket::waitForMessages() {
       });
 }
 
-void custom_socket::interpretGenericMessages() {
+void binance_ws::interpretGenericMessages() {
   if (m_requestedToStop)
     return;
 
@@ -152,7 +152,7 @@ void custom_socket::interpretGenericMessages() {
   waitForMessages();
 }
 
-void custom_socket::makeSubscription() {
+void binance_ws::makeSubscription() {
   m_writeBuffer = QString(R"(
     {
       "method": "SUBSCRIBE",
@@ -162,9 +162,7 @@ void custom_socket::makeSubscription() {
         "%1@aggTrade"
       ],
       "id": 10
-    })")
-                      .arg(m_tokenName.tokenName)
-                      .toStdString();
+    })").arg(m_tokenName.tokenName).toStdString();
 
   m_sslWebStream->async_write(
       net::buffer(m_writeBuffer),
@@ -178,8 +176,6 @@ void custom_socket::makeSubscription() {
         self->waitForMessages();
       });
 }
-
-void custom_socket::requestStop() { m_requestedToStop = true; }
 
 #ifdef _MSC_VER
 #undef GetObject
@@ -218,102 +214,4 @@ double binanceGetCoinPrice(char const *str, size_t const size) {
   return NAN;
 }
 
-std::unique_ptr<net::io_context> &getRawIOContext() {
-  static std::unique_ptr<net::io_context> ioContext = nullptr;
-  return ioContext;
 }
-
-net::io_context *getIOContext() {
-  auto &ioContext = getRawIOContext();
-  if (!ioContext) {
-    ioContext =
-        std::make_unique<net::io_context>(std::thread::hardware_concurrency());
-  }
-  return ioContext.get();
-}
-
-net::ssl::context &getSSLContext() {
-  static std::unique_ptr<net::ssl::context> ssl_context = nullptr;
-  if (!ssl_context) {
-    ssl_context =
-        std::make_unique<net::ssl::context>(net::ssl::context::tlsv12_client);
-    ssl_context->set_default_verify_paths();
-    ssl_context->set_verify_mode(boost::asio::ssl::verify_none);
-  }
-  return *ssl_context;
-}
-
-} // namespace detail
-
-cwebsocket::cwebsocket() : m_sslContext(detail::getSSLContext()) {
-  detail::getRawIOContext().reset();
-  m_ioContext = detail::getIOContext();
-}
-
-cwebsocket::~cwebsocket() {
-  m_ioContext->stop();
-
-  for (auto &sock : m_sockets) {
-    std::visit([](auto && v) {
-      v->requestStop();
-      delete v;
-    }, sock);
-  }
-
-  m_sockets.clear();
-}
-
-void cwebsocket::addSubscription(QString const &tokenName,
-                                 trade_type_e const tradeType,
-                                 exchange_name_e const exchange) {
-  auto iter = m_checker.find(exchange);
-  if (iter != m_checker.end()) {
-    auto iter2 = std::find_if(
-        iter->second.begin(), iter->second.end(),
-        [tradeType, tokenName](auto const &a) {
-          return a.tokenName.compare(tokenName, Qt::CaseInsensitive) == 0 &&
-                 tradeType == a.tradeType;
-        });
-    if (iter2 != iter->second.end())
-      return;
-    iter->second.push_back({tradeType, tokenName});
-  } else {
-    m_checker[exchange].push_back({tradeType, tokenName});
-  }
-
-  auto callback = [this](QString const &tokenName, double const price,
-                         exchange_name_e const exchange,
-                         trade_type_e const tradeType) {
-    emit onNewPriceAvailable(tokenName, price, exchange, tradeType);
-  };
-
-  if (exchange == exchange_name_e::binance) {
-    auto sock = new detail::custom_socket(
-        *m_ioContext, m_sslContext, tradeType);
-    sock->addSubscription(tokenName.toLower());
-    QObject::connect(sock, &detail::custom_socket::onNewPriceAvailable,
-                     this, callback);
-    m_sockets.push_back(std::move(sock));
-  } else if (exchange == exchange_name_e::kucoin) {
-    auto sock = new kc_websocket(*m_ioContext, m_sslContext, tradeType);
-    QObject::connect(sock, &kc_websocket::onNewPriceAvailable, this,
-                     callback);
-    sock->addSubscription(tokenName.toUpper());
-    m_sockets.push_back(std::move(sock));
-  }
-}
-
-void cwebsocket::startWatch() {
-  m_checker.clear();
-
-  for (auto &sock : m_sockets) {
-    std::visit([this](auto && v) mutable {
-      std::thread([this, &v]() mutable {
-        v->startFetching();
-        m_ioContext->run();
-      }).detach();
-    }, sock);
-  }
-}
-
-} // namespace korrelator

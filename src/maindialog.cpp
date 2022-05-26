@@ -11,7 +11,7 @@
 #include <QNetworkRequest>
 #include <set>
 
-#include "container.hpp"
+#include "websocket_manager.hpp"
 #include "order_model.hpp"
 #include "qcustomplot.h"
 
@@ -138,6 +138,8 @@ void MainDialog::populateUIComponents() {
     korrelator::restartTickValues.push_back(2'500);
   }
 
+  ui->resetPercentageLine->setValidator(new QDoubleValidator);
+  ui->specialLine->setValidator(new QDoubleValidator);
   ui->restartTickLine->setValidator(new QIntValidator(1, 1'000'000));
   ui->timerTickCombo->addItems(
       {"100ms", "200ms", "500ms", "1 sec", "2 secs", "5 secs"});
@@ -168,14 +170,22 @@ void MainDialog::onApplyButtonClicked() {
     auto const specialValue = getIntegralValue(ui->specialLine);
     if (isnan(specialValue))
       return;
+    m_resetPercentage = getIntegralValue(ui->resetPercentageLine);
+    if (isnan(m_resetPercentage)) {
+      m_resetPercentage = maxDoubleValue;
+      return;
+    }
+
     if (specialValue == maxDoubleValue)
       korrelator::restartTickValues[tick_line_type_e::special].reset();
     else
       korrelator::restartTickValues[tick_line_type_e::special].emplace(value);
     m_specialRef = specialValue;
+    m_doingManualReset = m_resetPercentage != maxDoubleValue;
     return ui->specialLine->setFocus();
-  } else
+  } else {
     korrelator::restartTickValues[index].emplace(value);
+  }
   ui->restartTickLine->setFocus();
 }
 
@@ -187,6 +197,7 @@ void MainDialog::connectAllUISignals() {
         using korrelator::tick_line_type_e;
         ui->specialLine->setText("");
         ui->restartTickLine->setText("");
+        ui->resetPercentageLine->setText("");
 
         auto &optionalValue = korrelator::restartTickValues[index];
         if (optionalValue) {
@@ -194,6 +205,11 @@ void MainDialog::connectAllUISignals() {
               *optionalValue != maxDoubleValue) {
             ui->specialLine->setText(QString::number(m_specialRef));
             ui->restartTickLine->setText(QString::number(*optionalValue));
+
+            if (maxDoubleValue != m_resetPercentage) {
+              ui->resetPercentageLine->setText(
+                    QString::number(m_resetPercentage));
+            }
           }
           if (index != tick_line_type_e::special)
             ui->restartTickLine->setText(
@@ -256,7 +272,7 @@ void MainDialog::connectAllUISignals() {
   });
 
   QObject::connect(ui->startButton, &QPushButton::clicked, this,
-                   [this] { onOKButtonClicked(); });
+                   &MainDialog::onOKButtonClicked);
 
   QObject::connect(ui->futuresNextButton, &QToolButton::clicked, this, [this] {
     auto const tokenName = ui->futuresCombo->currentText().trimmed();
@@ -284,6 +300,7 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->specialLine->setEnabled(enabled);
   ui->specialLine->setEnabled(enabled);
   ui->exchangeCombo->setEnabled(enabled);
+  ui->resetPercentageLine->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {
@@ -305,16 +322,11 @@ void MainDialog::stopGraphPlotting() {
 
 int MainDialog::getTimerTickMilliseconds() const {
   switch (ui->timerTickCombo->currentIndex()) {
-  case 0:
-    return 100;
-  case 1:
-    return 200;
-  case 2:
-    return 500;
-  case 3:
-    return 1'000;
-  case 4:
-    return 2'000;
+  case 0: return 100;
+  case 1: return 200;
+  case 2: return 500;
+  case 3: return 1'000;
+  case 4: return 2'000;
   case 5:
   default:
     return 5'000;
@@ -406,8 +418,8 @@ void MainDialog::newItemAdded(QString const &tokenName, trade_type_e const tt,
 auto tokenNameFromWidgetName(QString specialTokenName) {
   struct token_separate_t {
     QString tokenName;
-    korrelator::trade_type_e tradeType;
-    korrelator::exchange_name_e exchange;
+    trade_type_e tradeType;
+    exchange_name_e exchange;
   };
 
   token_separate_t data;
@@ -421,9 +433,9 @@ auto tokenNameFromWidgetName(QString specialTokenName) {
       specialTokenName.mid(openingBrace, closingBrace - openingBrace));
 
   if (specialTokenName.contains("_SPOT"))
-    data.tradeType = korrelator::trade_type_e::spot;
+    data.tradeType = trade_type_e::spot;
   else
-    data.tradeType = korrelator::trade_type_e::futures;
+    data.tradeType = trade_type_e::futures;
   return data;
 }
 
@@ -454,9 +466,9 @@ void MainDialog::getSpotsTokens(korrelator::exchange_name_e const exchange,
     return sendNetworkRequest(QUrl(exchangeUrl), cb, trade_type_e::spot,
                               exchange);
 
+  ui->spotCombo->clear();
   auto &spots = m_watchables[(int)exchange].spots;
   if (!spots.empty()) {
-    ui->spotCombo->clear();
     for (auto const &d : spots)
       ui->spotCombo->addItem(d.tokenName.toUpper());
     return;
@@ -464,7 +476,6 @@ void MainDialog::getSpotsTokens(korrelator::exchange_name_e const exchange,
 
   auto callback = [this](korrelator::token_list_t &&list,
                          exchange_name_e const exchange) {
-    ui->spotCombo->clear();
     for (auto const &d : list)
       ui->spotCombo->addItem(d.tokenName.toUpper());
     m_watchables[(int)exchange].spots = std::move(list);
@@ -483,9 +494,9 @@ void MainDialog::getFuturesTokens(korrelator::exchange_name_e const exchange,
     return sendNetworkRequest(QUrl(exchangeUrl), cb, trade_type_e::futures,
                               exchange);
 
+  ui->futuresCombo->clear();
   auto &futures = m_watchables[(int)exchange].futures;
   if (!futures.empty()) {
-    ui->futuresCombo->clear();
     for (auto const &d : futures)
       ui->futuresCombo->addItem(d.tokenName.toUpper());
     return;
@@ -493,7 +504,6 @@ void MainDialog::getFuturesTokens(korrelator::exchange_name_e const exchange,
 
   auto callback = [this](korrelator::token_list_t &&list,
                          exchange_name_e const exchange) {
-    ui->futuresCombo->clear();
     for (auto const &d : list)
       ui->futuresCombo->addItem(d.tokenName.toUpper());
     m_watchables[(int)exchange].futures = std::move(list);
@@ -518,7 +528,7 @@ void MainDialog::saveTokensToFile() {
     auto const &d = tokenNameFromWidgetName(displayedName);
     obj["symbol"] = d.tokenName.toLower();
     obj["market"] =
-        d.tradeType == korrelator::trade_type_e::spot ? "spot" : "futures";
+        d.tradeType == trade_type_e::spot ? "spot" : "futures";
     obj["ref"] = displayedName.endsWith('*');
     obj["exchange"] = korrelator::exchangeNameToString(d.exchange);
     jsonList.append(obj);
@@ -546,8 +556,7 @@ void MainDialog::readTokensFromFile() {
     QJsonObject const obj = jsonList[i].toObject();
     auto const tokenName = obj["symbol"].toString().toUpper();
     auto const tradeType = obj["market"].toString().toLower() == "spot"
-                               ? korrelator::trade_type_e::spot
-                               : korrelator::trade_type_e::futures;
+                               ? trade_type_e::spot : trade_type_e::futures;
     auto const isRef = obj["ref"].toBool();
     auto const exchange =
         korrelator::stringToExchangeName(obj["exchange"].toString());
@@ -560,11 +569,11 @@ void MainDialog::readTokensFromFile() {
 }
 
 void MainDialog::addNewItemToTokenMap(
-    QString const &tokenName, korrelator::trade_type_e const tt,
+    QString const &tokenName, trade_type_e const tt,
     korrelator::exchange_name_e const exchange) {
   auto const text =
       tokenName.toUpper() +
-      (tt == korrelator::trade_type_e::spot ? "_SPOT" : "_FUTURES") +
+      (tt == trade_type_e::spot ? "_SPOT" : "_FUTURES") +
       ("(" + exchangeNameToString(exchange) + ")") +
       (ui->refCheckBox->isChecked() ? "*" : "");
   for (int i = 0; i < ui->tokenListWidget->count(); ++i) {
@@ -578,7 +587,7 @@ void MainDialog::addNewItemToTokenMap(
 
 void MainDialog::sendNetworkRequest(QUrl const &url,
                                     callback_t onSuccessCallback,
-                                    korrelator::trade_type_e const tradeType,
+                                    trade_type_e const tradeType,
                                     exchange_name_e const exchange) {
   QNetworkRequest request(url);
   request.setHeader(QNetworkRequest::KnownHeaders::ContentTypeHeader,
@@ -688,11 +697,11 @@ void MainDialog::setupGraphData() {
   /* Add graph and set the curve lines color */
   {
     auto legendName = [](QString const &key,
-                         korrelator::trade_type_e const tt) {
+                         trade_type_e const tt) {
       if (key.size() == 1 && key[0] == '*') // "ref"
         return QString("ref");
       return (key.toUpper() +
-              (tt == korrelator::trade_type_e::spot ? "_SPOT" : "_FUTURES"));
+              (tt == trade_type_e::spot ? "_SPOT" : "_FUTURES"));
     };
     int i = 0;
     for (auto &value : m_tokens) {
@@ -814,6 +823,9 @@ double MainDialog::getIntegralValue(QLineEdit *lineEdit) {
 }
 
 bool MainDialog::validateUserInput() {
+  if (m_doingManualReset)
+    m_resetPercentage /= 100.0;
+
   m_threshold = getIntegralValue(ui->umbralLine);
   if (isnan(m_threshold))
     return false;
@@ -878,6 +890,8 @@ void MainDialog::onNewPriceReceived(QString const &tokenName,
                                     trade_type_e const tt) {
   auto iter = find(m_tokens, tokenName, tt, exchange);
   if (iter != m_tokens.end()) {
+    if (iter->realPrice == price)
+      return;
     std::lock_guard<std::mutex> lock_g{m_mutex};
     updateTokenIter(iter, price);
   }
@@ -892,7 +906,7 @@ void MainDialog::onNewPriceReceived(QString const &tokenName,
 void MainDialog::startWebsocket() {
   // price updater
   m_priceUpdater.worker = std::make_unique<korrelator::Worker>([this] {
-    m_websocket = std::make_unique<korrelator::cwebsocket>();
+    m_websocket = std::make_unique<korrelator::websocket_manager>();
 
     for (auto const &tokenInfo : m_refs) {
       m_websocket->addSubscription(tokenInfo.tokenName, tokenInfo.tradeType,
@@ -906,7 +920,7 @@ void MainDialog::startWebsocket() {
     }
 
     QObject::connect(m_websocket.get(),
-                     &korrelator::cwebsocket::onNewPriceAvailable, this,
+                     &korrelator::websocket_manager::onNewPriceAvailable, this,
                      &MainDialog::onNewPriceReceived);
     m_websocket->startWatch();
   });
@@ -1024,13 +1038,13 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
       (m_hasReferences) ? m_refIterator->normalizedPrice : maxDoubleValue;
 
   std::lock_guard<std::mutex> lock_g{m_mutex};
-  bool isResettingSymbols = false;
 
   // update ref symbol data on the graph
   auto refResult = (!m_hasReferences)
                        ? korrelator::ref_calculation_data_t()
                        : updateRefGraph(keyStart, key, updatingMinMax);
   double currentRef = m_refIterator->normalizedPrice;
+  bool isResettingSymbols = false;
 
   // update the real symbols
   for (int i = 1; i < m_tokens.size(); ++i) {
@@ -1071,8 +1085,7 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
       if (m_findingUmbral && amp >= m_threshold) {
         korrelator::model_data_t data;
         data.marketType =
-            (value.tradeType == korrelator::trade_type_e::spot ? "SPOT"
-                                                               : "FUTURES");
+            (value.tradeType == trade_type_e::spot ? "SPOT" : "FUTURES");
         data.signalPrice = crossOverValue.price;
         data.openPrice = value.realPrice;
         data.side = actionTypeToString(value.crossOver->action);
@@ -1089,20 +1102,27 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
       }
     }
 
-    if (refResult.eachTickNormalize) {
-      currentRef /= m_refIterator->alpha;
+    if (refResult.eachTickNormalize || m_resetPercentage) {
+      auto const newCurrentRef = currentRef / m_refIterator->alpha;
       auto const distanceFromRefToSymbol = // a
-          ((value.normalizedPrice > currentRef)
-               ? (value.normalizedPrice / currentRef)
-               : (currentRef / value.normalizedPrice)) -
+          ((value.normalizedPrice > newCurrentRef)
+               ? (value.normalizedPrice / newCurrentRef)
+               : (newCurrentRef / value.normalizedPrice)) -
           1.0;
       auto const distanceThreshold = m_specialRef; // b
-      if (value.normalizedPrice > currentRef) {
-        m_refIterator->alpha =
-            ((distanceFromRefToSymbol + 1) / (distanceThreshold + 1.0));
-      } else {
-        m_refIterator->alpha =
-            ((distanceThreshold + 1) / (distanceFromRefToSymbol + 1.0));
+
+      if (m_doingManualReset && distanceFromRefToSymbol > m_resetPercentage)
+        refResult.isResettingRef = true;
+
+      if (refResult.eachTickNormalize) {
+        if (value.normalizedPrice > newCurrentRef) {
+          m_refIterator->alpha =
+              ((distanceFromRefToSymbol + 1) / (distanceThreshold + 1.0));
+        } else {
+          m_refIterator->alpha =
+              ((distanceThreshold + 1) / (distanceFromRefToSymbol + 1.0));
+        }
+        currentRef = newCurrentRef;
       }
     }
 

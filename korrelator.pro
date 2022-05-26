@@ -17,16 +17,17 @@ QMAKE_CXXFLAGS += -bigobj
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
-  src/cwebsocket.cpp \
+  src/binance_websocket.cpp \
   src/kc_websocket.cpp \
   src/maindialog.cpp \
   src/order_model.cpp \
   src/qcustomplot.cpp \
-  src/uri.cpp
+  src/uri.cpp \
+  src/websocket_manager.cpp
 
 HEADERS += \
+  include/binance_websocket.hpp \
   include/container.hpp \
-  include/cwebsocket.hpp \
   include/kc_websocket.hpp \
   include/maindialog.hpp \
   include/order_model.hpp \
@@ -34,7 +35,8 @@ HEADERS += \
   include/sthread.hpp \
   include/uri.hpp \
   include/utils.hpp \
-  include/tokens.hpp
+  include/tokens.hpp \
+  include/websocket_manager.hpp
 
 FORMS += \
     ui/maindialog.ui

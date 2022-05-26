@@ -8,7 +8,6 @@
 #include <memory>
 #include <optional>
 
-#include "cwebsocket.hpp"
 #include "order_model.hpp"
 #include "sthread.hpp"
 #include "tokens.hpp"
@@ -23,6 +22,8 @@ class QCPGraph;
 class QCPLayoutGrid;
 
 namespace korrelator {
+
+class websocket_manager;
 
 struct graph_updater_t {
   worker_ptr worker = nullptr;
@@ -118,7 +119,7 @@ private:
   Ui::MainDialog *ui;
 
   QNetworkAccessManager m_networkManager;
-  korrelator::cwebsocket_ptr m_websocket = nullptr;
+  std::unique_ptr<korrelator::websocket_manager> m_websocket = nullptr;
   std::unique_ptr<korrelator::order_model> m_model = nullptr;
 
   QMap<int, korrelator::watchable_data_t> m_watchables;
@@ -133,11 +134,12 @@ private:
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
   korrelator::exchange_name_e m_currentExchange;
+
   double m_threshold = 0.0;
-
   double m_specialRef = std::numeric_limits<double>::max();
+  double m_resetPercentage = m_specialRef;
   bool m_findingSpecialRef = false;
-
+  bool m_doingManualReset = false;
   bool m_programIsRunning = false;
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;

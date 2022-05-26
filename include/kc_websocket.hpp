@@ -1,25 +1,38 @@
 #pragma once
 
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/ssl/context.hpp>
+#include <QObject>
+
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/ssl/ssl_stream.hpp>
 #include <boost/beast/websocket/stream.hpp>
 
-#include <QString>
-#include <QObject>
 #include <optional>
-
-#include "utils.hpp"
 #include "uri.hpp"
+
+namespace boost {
+
+namespace asio {
+
+namespace ssl {
+
+class context;
+
+}
+
+class io_context;
+
+}
+
+}
+
+
+namespace korrelator {
 
 namespace net = boost::asio;
 namespace ssl = net::ssl;
 namespace beast = boost::beast;
-
-namespace korrelator {
 namespace ws = beast::websocket;
 namespace ip = net::ip;
 
@@ -30,20 +43,23 @@ struct instance_server_data_t {
   int encryptProtocol = 0; // bool encrypt or not
 };
 
+enum class trade_type_e;
+enum class exchange_name_e;
+
 // kucoin websocket
-class kc_websocket : public QObject {
+class kucoin_ws : public QObject {
 
   Q_OBJECT
   using resolver = ip::tcp::resolver;
   using results_type = resolver::results_type;
 
 public:
-  kc_websocket(net::io_context &ioContext, ssl::context &sslContext,
-               trade_type_e const);
-  ~kc_websocket();
-  void addSubscription(QString const &);// override;
-  void startFetching()/* override */{ restApiInitiateConnection(); }
-  void requestStop() /*override */{ m_requestedToStop = true; }
+  kucoin_ws(net::io_context &ioContext, ssl::context &sslContext,
+            trade_type_e const);
+  ~kucoin_ws();
+  void addSubscription(QString const &);
+  void startFetching() { restApiInitiateConnection(); }
+  void requestStop() { m_requestedToStop = true; }
 
 signals:
   void onNewPriceAvailable(QString const &tokenName,
@@ -74,7 +90,7 @@ private:
   std::optional<ws::stream<beast::ssl_stream<beast::tcp_stream>>>
       m_sslWebStream;
   std::optional<beast::http::response<beast::http::string_body>> m_response;
-  std::optional<beast::flat_buffer> m_readWriteBuffer;
+  beast::flat_buffer m_readWriteBuffer;
   std::vector<instance_server_data_t> m_instanceServers;
   std::string m_websocketToken;
   std::string m_subscriptionString;
