@@ -11,9 +11,9 @@
 #include <QNetworkRequest>
 #include <set>
 
-#include "websocket_manager.hpp"
 #include "order_model.hpp"
 #include "qcustomplot.h"
+#include "websocket_manager.hpp"
 
 static char const *const binance_futures_tokens_url =
     "https://fapi.binance.com/fapi/v1/ticker/price";
@@ -29,6 +29,11 @@ static constexpr const double maxDoubleValue =
     std::numeric_limits<double>::max();
 
 namespace korrelator {
+
+static double maxVisiblePlot = 100.0;
+static QTime time(QTime::currentTime());
+static double lastPoint = 0.0;
+static std::vector<std::optional<double>> restartTickValues{};
 
 QString actionTypeToString(korrelator::trade_action_e a) {
   if (a == korrelator::trade_action_e::buy)
@@ -92,28 +97,22 @@ void token_t::reset() {
   alpha = 1.0;
 }
 
-static double maxVisiblePlot = 100.0;
-static QTime time(QTime::currentTime());
-static double lastPoint = 0.0;
-static std::vector<std::optional<double>> restartTickValues{};
 } // namespace korrelator
 
 // =======================================================================
 
 MainDialog::MainDialog(QWidget *parent)
     : QDialog(parent), ui(new Ui::MainDialog) {
+
   ui->setupUi(this);
-
-  qRegisterMetaType<korrelator::model_data_t>();
-  qRegisterMetaType<korrelator::cross_over_data_t>();
-  qRegisterMetaType<korrelator::exchange_name_e>();
-  qRegisterMetaType<korrelator::trade_type_e>();
-
   setWindowIcon(qApp->style()->standardPixmap(QStyle::SP_DesktopIcon));
   setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint |
                  Qt::WindowMaximizeButtonHint);
+
   ui->restartTickCombo->addItems(
       {"Normal lines", "Ref line", "All lines", "Special"});
+
+  registerCustomTypes();
   populateUIComponents();
   connectAllUISignals();
   readTokensFromFile();
@@ -126,6 +125,13 @@ MainDialog::~MainDialog() {
   saveTokensToFile();
 
   delete ui;
+}
+
+void MainDialog::registerCustomTypes() {
+  qRegisterMetaType<korrelator::model_data_t>();
+  qRegisterMetaType<korrelator::cross_over_data_t>();
+  qRegisterMetaType<korrelator::exchange_name_e>();
+  qRegisterMetaType<korrelator::trade_type_e>();
 }
 
 void MainDialog::populateUIComponents() {
@@ -148,8 +154,10 @@ void MainDialog::populateUIComponents() {
                                 "3 hrs", "5 hrs"});
   ui->legendPositionCombo->addItems(
       {"Top Left", "Top Right", "Bottom Left", "Bottom Right"});
+  ui->graphThicknessCombo->addItems({"1", "2", "3", "4", "5"});
   ui->umbralLine->setValidator(new QDoubleValidator);
   ui->umbralLine->setText("5");
+  ui->oneOpCheckBox->setChecked(true);
 }
 
 void MainDialog::onApplyButtonClicked() {
@@ -208,7 +216,7 @@ void MainDialog::connectAllUISignals() {
 
             if (maxDoubleValue != m_resetPercentage) {
               ui->resetPercentageLine->setText(
-                    QString::number(m_resetPercentage));
+                  QString::number(m_resetPercentage));
             }
           }
           if (index != tick_line_type_e::special)
@@ -223,22 +231,19 @@ void MainDialog::connectAllUISignals() {
       ui->exchangeCombo,
       static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
       this, [this](int const index) {
-        if (index == 2) {
-          ui->futuresCombo->clear();
-          ui->spotCombo->clear();
-          m_currentExchange = exchange_name_e::none;
-          return;
-        }
-        m_currentExchange = static_cast<exchange_name_e>(index);
-        getSpotsTokens(m_currentExchange);
-        getFuturesTokens(m_currentExchange);
+        auto const exchange = static_cast<exchange_name_e>(index);
+        getSpotsTokens(exchange);
+        getFuturesTokens(exchange);
       });
   ui->exchangeCombo->addItems({"Binance", "KuCoin"});
 
   QObject::connect(ui->applyButton, &QPushButton::clicked, this,
                    &MainDialog::onApplyButtonClicked);
-  QObject::connect(this, &MainDialog::newOrderDetected, this,
-                   &MainDialog::generateJsonFile);
+  QObject::connect(
+      this, &MainDialog::newOrderDetected, this,
+      [this](korrelator::cross_over_data_t a, korrelator::model_data_t b) {
+        onNewOrderDetected(std::move(a), std::move(b));
+      });
 
   QObject::connect(
       ui->selectionCombo,
@@ -257,7 +262,9 @@ void MainDialog::connectAllUISignals() {
     auto const tokenName = ui->spotCombo->currentText().trimmed();
     if (tokenName.isEmpty())
       return;
-    addNewItemToTokenMap(tokenName, trade_type_e::spot, m_currentExchange);
+    auto const exchange = static_cast<exchange_name_e>(
+          ui->exchangeCombo->currentIndex());
+    addNewItemToTokenMap(tokenName, trade_type_e::spot, exchange);
     saveTokensToFile();
   });
 
@@ -279,9 +286,34 @@ void MainDialog::connectAllUISignals() {
     if (tokenName.isEmpty())
       return;
 
-    addNewItemToTokenMap(tokenName, trade_type_e::futures, m_currentExchange);
+    auto const exchange = static_cast<exchange_name_e>(
+          ui->exchangeCombo->currentIndex());
+    addNewItemToTokenMap(tokenName, trade_type_e::futures, exchange);
     saveTokensToFile();
   });
+}
+
+void MainDialog::onNewOrderDetected(korrelator::cross_over_data_t crossOver,
+                                    korrelator::model_data_t modelData) {
+  using korrelator::trade_action_e;
+  auto &currentAction = crossOver.action;
+
+  if (ui->reverseCheckBox->isChecked()) {
+    if (currentAction == trade_action_e::buy)
+      currentAction = trade_action_e::sell;
+    else
+      currentAction = trade_action_e::buy;
+  }
+
+  if (ui->oneOpCheckBox->isChecked()) {
+    if (m_lastTradeAction == currentAction)
+      return;
+    m_lastTradeAction = currentAction;
+  }
+
+  modelData.side = korrelator::actionTypeToString(currentAction);
+  generateJsonFile(modelData);
+  m_model->AddData(std::move(modelData));
 }
 
 void MainDialog::enableUIComponents(bool const enabled) {
@@ -301,6 +333,9 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->specialLine->setEnabled(enabled);
   ui->exchangeCombo->setEnabled(enabled);
   ui->resetPercentageLine->setEnabled(enabled);
+  ui->reverseCheckBox->setEnabled(enabled);
+  ui->oneOpCheckBox->setEnabled(enabled);
+  ui->graphThicknessCombo->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {
@@ -322,11 +357,16 @@ void MainDialog::stopGraphPlotting() {
 
 int MainDialog::getTimerTickMilliseconds() const {
   switch (ui->timerTickCombo->currentIndex()) {
-  case 0: return 100;
-  case 1: return 200;
-  case 2: return 500;
-  case 3: return 1'000;
-  case 4: return 2'000;
+  case 0:
+    return 100;
+  case 1:
+    return 200;
+  case 2:
+    return 500;
+  case 3:
+    return 1'000;
+  case 4:
+    return 2'000;
   case 5:
   default:
     return 5'000;
@@ -527,8 +567,7 @@ void MainDialog::saveTokensToFile() {
     auto const displayedName = item->text();
     auto const &d = tokenNameFromWidgetName(displayedName);
     obj["symbol"] = d.tokenName.toLower();
-    obj["market"] =
-        d.tradeType == trade_type_e::spot ? "spot" : "futures";
+    obj["market"] = d.tradeType == trade_type_e::spot ? "spot" : "futures";
     obj["ref"] = displayedName.endsWith('*');
     obj["exchange"] = korrelator::exchangeNameToString(d.exchange);
     jsonList.append(obj);
@@ -556,7 +595,8 @@ void MainDialog::readTokensFromFile() {
     QJsonObject const obj = jsonList[i].toObject();
     auto const tokenName = obj["symbol"].toString().toUpper();
     auto const tradeType = obj["market"].toString().toLower() == "spot"
-                               ? trade_type_e::spot : trade_type_e::futures;
+                               ? trade_type_e::spot
+                               : trade_type_e::futures;
     auto const isRef = obj["ref"].toBool();
     auto const exchange =
         korrelator::stringToExchangeName(obj["exchange"].toString());
@@ -571,11 +611,10 @@ void MainDialog::readTokensFromFile() {
 void MainDialog::addNewItemToTokenMap(
     QString const &tokenName, trade_type_e const tt,
     korrelator::exchange_name_e const exchange) {
-  auto const text =
-      tokenName.toUpper() +
-      (tt == trade_type_e::spot ? "_SPOT" : "_FUTURES") +
-      ("(" + exchangeNameToString(exchange) + ")") +
-      (ui->refCheckBox->isChecked() ? "*" : "");
+  auto const text = tokenName.toUpper() +
+                    (tt == trade_type_e::spot ? "_SPOT" : "_FUTURES") +
+                    ("(" + exchangeNameToString(exchange) + ")") +
+                    (ui->refCheckBox->isChecked() ? "*" : "");
   for (int i = 0; i < ui->tokenListWidget->count(); ++i) {
     QListWidgetItem *item = ui->tokenListWidget->item(i);
     if (text == item->text())
@@ -645,8 +684,7 @@ void MainDialog::sendNetworkRequest(QUrl const &url,
               t.realPrice = f.toString().toDouble();
             else
               t.realPrice = f.toDouble();
-          }
-          else
+          } else
             t.realPrice = tokenObject.value(key).toString().toDouble();
           t.exchange = exchange;
           t.tradeType = tradeType;
@@ -696,8 +734,7 @@ void MainDialog::setupGraphData() {
 
   /* Add graph and set the curve lines color */
   {
-    auto legendName = [](QString const &key,
-                         trade_type_e const tt) {
+    auto legendName = [](QString const &key, trade_type_e const tt) {
       if (key.size() == 1 && key[0] == '*') // "ref"
         return QString("ref");
       return (key.toUpper() +
@@ -707,7 +744,11 @@ void MainDialog::setupGraphData() {
     for (auto &value : m_tokens) {
       value.graph = ui->customPlot->addGraph();
       auto const color = colors[i % (sizeof(colors) / sizeof(colors[0]))];
-      value.graph->setPen(QPen(color));
+      value.graph->setPen(
+            QPen(color, ui->graphThicknessCombo->currentIndex() + 1));
+
+      qDebug() << value.graph->pen().width();
+
       value.graph->setAntialiasedFill(true);
       value.legendName = legendName(value.tokenName, value.tradeType);
       value.graph->setName(value.legendName);
@@ -756,7 +797,8 @@ void MainDialog::getInitialTokenPrices() {
       auto &value = *listIter;
       if (value.tradeType != tt || value.tokenName.size() == 1)
         continue;
-      auto iter = find(result, value.tokenName, value.tradeType, value.exchange);
+      auto iter =
+          find(result, value.tokenName, value.tradeType, value.exchange);
       if (iter != result.end()) {
         listIter->calculatingNewMinMax = true;
         updateTokenIter(listIter, iter->realPrice);
@@ -785,7 +827,7 @@ void MainDialog::getInitialTokenPrices() {
   std::set<exchange_name_e> exchanges;
   for (auto &t : m_refs)
     exchanges.insert(t.exchange);
-  for (auto &t: m_tokens)
+  for (auto &t : m_tokens)
     if (t.exchange != exchange_name_e::none)
       exchanges.insert(t.exchange);
 
@@ -863,6 +905,7 @@ void MainDialog::onOKButtonClicked() {
     return;
 
   m_programIsRunning = true;
+  m_lastTradeAction = korrelator::trade_action_e::do_nothing;
   korrelator::maxVisiblePlot = getMaxPlotsInVisibleRegion();
 
   ui->startButton->setText("Stop");
@@ -1088,41 +1131,41 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
             (value.tradeType == trade_type_e::spot ? "SPOT" : "FUTURES");
         data.signalPrice = crossOverValue.price;
         data.openPrice = value.realPrice;
-        data.side = actionTypeToString(value.crossOver->action);
         data.symbol = value.tokenName;
         data.openTime =
             QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
         data.signalTime = crossOverValue.time;
 
-        emit newOrderDetected(crossOverValue, data);
-        m_model->AddData(std::move(data));
-
+        emit newOrderDetected(std::move(crossOverValue), std::move(data));
         value.crossedOver = false;
         value.crossOver.reset();
       }
     }
 
-    if (refResult.eachTickNormalize || m_resetPercentage) {
-      auto const newCurrentRef = currentRef / m_refIterator->alpha;
+    if (refResult.eachTickNormalize || m_doingManualReset) {
+      currentRef /= m_refIterator->alpha;
       auto const distanceFromRefToSymbol = // a
-          ((value.normalizedPrice > newCurrentRef)
-               ? (value.normalizedPrice / newCurrentRef)
-               : (newCurrentRef / value.normalizedPrice)) -
+          ((value.normalizedPrice > currentRef)
+               ? (value.normalizedPrice / currentRef)
+               : (currentRef / value.normalizedPrice)) -
           1.0;
       auto const distanceThreshold = m_specialRef; // b
 
-      if (m_doingManualReset && distanceFromRefToSymbol > m_resetPercentage)
-        refResult.isResettingRef = true;
 
-      if (refResult.eachTickNormalize) {
-        if (value.normalizedPrice > newCurrentRef) {
+      bool const resettingRef = m_doingManualReset &&
+          distanceFromRefToSymbol > m_resetPercentage;
+
+      if (refResult.eachTickNormalize || resettingRef) {
+        qDebug() << distanceFromRefToSymbol << m_resetPercentage;
+        if (value.normalizedPrice > currentRef) {
           m_refIterator->alpha =
               ((distanceFromRefToSymbol + 1) / (distanceThreshold + 1.0));
         } else {
           m_refIterator->alpha =
               ((distanceThreshold + 1) / (distanceFromRefToSymbol + 1.0));
         }
-        currentRef = newCurrentRef;
+        if (resettingRef)
+          refResult.isResettingRef = true;
       }
     }
 
@@ -1181,8 +1224,7 @@ void MainDialog::resetTickerData(const bool resetRefs,
     resetMap(m_tokens);
 }
 
-void MainDialog::generateJsonFile(korrelator::cross_over_data_t const &,
-                                  korrelator::model_data_t const &modelData) {
+void MainDialog::generateJsonFile(korrelator::model_data_t const &modelData) {
   static auto const path =
       QDir::currentPath() + "/correlator/" +
       QDateTime::currentDateTime().toString("yyyy_MM_dd_hh_mm_ss") + "/";

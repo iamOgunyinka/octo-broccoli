@@ -14,7 +14,7 @@
    <string>Korrelator</string>
   </property>
   <layout class="QGridLayout" name="gridLayout_2">
-   <item row="1" column="0">
+   <item row="1" column="3">
     <spacer name="horizontalSpacer">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
@@ -27,34 +27,41 @@
      </property>
     </spacer>
    </item>
-   <item row="1" column="1">
+   <item row="1" column="4">
     <widget class="QPushButton" name="startButton">
      <property name="text">
       <string>Start</string>
      </property>
     </widget>
    </item>
-   <item row="0" column="0" colspan="2">
+   <item row="0" column="0" colspan="5">
     <widget class="QSplitter" name="splitter_2">
      <property name="orientation">
       <enum>Qt::Vertical</enum>
      </property>
      <widget class="QWidget" name="layoutWidget">
       <layout class="QGridLayout" name="gridLayout">
-       <item row="6" column="4">
-        <widget class="QLineEdit" name="specialLine">
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-         <property name="placeholderText">
-          <string>Special 1%</string>
+       <item row="3" column="0">
+        <widget class="QLabel" name="label_3">
+         <property name="text">
+          <string>Show Label in</string>
          </property>
         </widget>
        </item>
-       <item row="1" column="8">
-        <widget class="QToolButton" name="spotNextButton">
+       <item row="6" column="0">
+        <widget class="QLabel" name="label_6">
          <property name="text">
-          <string>&gt;&gt;</string>
+          <string>Restart on Tick</string>
+         </property>
+        </widget>
+       </item>
+       <item row="3" column="1" colspan="6">
+        <widget class="QComboBox" name="legendPositionCombo"/>
+       </item>
+       <item row="2" column="0">
+        <widget class="QLabel" name="label_2">
+         <property name="text">
+          <string>Futures</string>
          </property>
         </widget>
        </item>
@@ -65,82 +72,8 @@
          </property>
         </widget>
        </item>
-       <item row="5" column="0">
-        <widget class="QLabel" name="label_5">
-         <property name="text">
-          <string>Periodic Tick</string>
-         </property>
-        </widget>
-       </item>
-       <item row="6" column="1">
-        <widget class="QLineEdit" name="restartTickLine">
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-         <property name="placeholderText">
-          <string>2500</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1" colspan="6">
-        <widget class="QComboBox" name="spotCombo">
-         <property name="minimumSize">
-          <size>
-           <width>150</width>
-           <height>0</height>
-          </size>
-         </property>
-        </widget>
-       </item>
        <item row="5" column="1" colspan="6">
         <widget class="QComboBox" name="timerTickCombo"/>
-       </item>
-       <item row="0" column="10" rowspan="8">
-        <widget class="QListWidget" name="tokenListWidget"/>
-       </item>
-       <item row="1" column="9" rowspan="2">
-        <widget class="QToolButton" name="spotPrevButton">
-         <property name="font">
-          <font>
-           <pointsize>10</pointsize>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="text">
-          <string>&lt;&lt;</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0">
-        <widget class="QLabel" name="label">
-         <property name="text">
-          <string>Spot</string>
-         </property>
-        </widget>
-       </item>
-       <item row="7" column="0">
-        <widget class="QLabel" name="label_7">
-         <property name="text">
-          <string>Umbral</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="1" colspan="6">
-        <widget class="QComboBox" name="legendPositionCombo"/>
-       </item>
-       <item row="2" column="8">
-        <widget class="QToolButton" name="futuresNextButton">
-         <property name="text">
-          <string>&gt;&gt;</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="0">
-        <widget class="QLabel" name="label_8">
-         <property name="text">
-          <string>Exchange</string>
-         </property>
-        </widget>
        </item>
        <item row="6" column="2" colspan="2">
         <widget class="QLineEdit" name="resetPercentageLine">
@@ -152,6 +85,23 @@
          </property>
         </widget>
        </item>
+       <item row="0" column="1" colspan="6">
+        <widget class="QComboBox" name="exchangeCombo"/>
+       </item>
+       <item row="3" column="7" colspan="2">
+        <widget class="QCheckBox" name="refCheckBox">
+         <property name="text">
+          <string>Use as ref</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="0">
+        <widget class="QLabel" name="label_8">
+         <property name="text">
+          <string>Exchange</string>
+         </property>
+        </widget>
+       </item>
        <item row="4" column="0">
         <widget class="QLabel" name="label_4">
          <property name="text">
@@ -159,10 +109,29 @@
          </property>
         </widget>
        </item>
-       <item row="6" column="0">
-        <widget class="QLabel" name="label_6">
+       <item row="1" column="8" rowspan="2">
+        <widget class="QToolButton" name="spotPrevButton">
+         <property name="minimumSize">
+          <size>
+           <width>30</width>
+           <height>50</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <pointsize>10</pointsize>
+           <bold>true</bold>
+          </font>
+         </property>
          <property name="text">
-          <string>Restart on Tick</string>
+          <string>&lt;&lt;</string>
+         </property>
+        </widget>
+       </item>
+       <item row="7" column="4">
+        <widget class="QLabel" name="label_9">
+         <property name="text">
+          <string>Graph Thickness</string>
          </property>
         </widget>
        </item>
@@ -176,42 +145,103 @@
          </property>
         </widget>
        </item>
-       <item row="3" column="8" colspan="2">
-        <widget class="QCheckBox" name="refCheckBox">
-         <property name="text">
-          <string>Use as ref</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0">
-        <widget class="QLabel" name="label_3">
-         <property name="text">
-          <string>Show Label in</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="1" colspan="6">
-        <widget class="QComboBox" name="exchangeCombo"/>
+       <item row="0" column="10" rowspan="8">
+        <widget class="QListWidget" name="tokenListWidget"/>
        </item>
        <item row="4" column="1" colspan="6">
         <widget class="QComboBox" name="selectionCombo"/>
        </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="label_2">
+       <item row="6" column="1">
+        <widget class="QLineEdit" name="restartTickLine">
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+         <property name="placeholderText">
+          <string>2500</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="7">
+        <widget class="QToolButton" name="spotNextButton">
          <property name="text">
-          <string>Futures</string>
+          <string>&gt;&gt;</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="label">
+         <property name="text">
+          <string>Spot</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="7" colspan="2">
+        <widget class="QCheckBox" name="oneOpCheckBox">
+         <property name="text">
+          <string>One-operation only</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="0">
+        <widget class="QLabel" name="label_5">
+         <property name="text">
+          <string>Periodic Tick</string>
+         </property>
+        </widget>
+       </item>
+       <item row="6" column="4">
+        <widget class="QLineEdit" name="specialLine">
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+         <property name="placeholderText">
+          <string>Special 1%</string>
+         </property>
+        </widget>
+       </item>
+       <item row="7" column="0">
+        <widget class="QLabel" name="label_7">
+         <property name="text">
+          <string>Umbral</string>
          </property>
         </widget>
        </item>
        <item row="6" column="5" colspan="2">
         <widget class="QComboBox" name="restartTickCombo"/>
        </item>
-       <item row="6" column="8" colspan="2">
+       <item row="4" column="7" colspan="2">
+        <widget class="QCheckBox" name="reverseCheckBox">
+         <property name="text">
+          <string>Reverse</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1" colspan="6">
+        <widget class="QComboBox" name="spotCombo">
+         <property name="minimumSize">
+          <size>
+           <width>150</width>
+           <height>0</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="7">
+        <widget class="QToolButton" name="futuresNextButton">
+         <property name="text">
+          <string>&gt;&gt;</string>
+         </property>
+        </widget>
+       </item>
+       <item row="6" column="7" colspan="2">
         <widget class="QPushButton" name="applyButton">
          <property name="text">
           <string>Apply</string>
          </property>
         </widget>
+       </item>
+       <item row="7" column="5" colspan="4">
+        <widget class="QComboBox" name="graphThicknessCombo"/>
        </item>
       </layout>
      </widget>
@@ -244,10 +274,7 @@
  <tabstops>
   <tabstop>exchangeCombo</tabstop>
   <tabstop>spotCombo</tabstop>
-  <tabstop>spotNextButton</tabstop>
   <tabstop>futuresCombo</tabstop>
-  <tabstop>futuresNextButton</tabstop>
-  <tabstop>spotPrevButton</tabstop>
   <tabstop>legendPositionCombo</tabstop>
   <tabstop>selectionCombo</tabstop>
   <tabstop>timerTickCombo</tabstop>
@@ -255,10 +282,7 @@
   <tabstop>resetPercentageLine</tabstop>
   <tabstop>specialLine</tabstop>
   <tabstop>restartTickCombo</tabstop>
-  <tabstop>applyButton</tabstop>
   <tabstop>umbralLine</tabstop>
-  <tabstop>tokenListWidget</tabstop>
-  <tabstop>refCheckBox</tabstop>
   <tabstop>tableView</tabstop>
   <tabstop>startButton</tabstop>
  </tabstops>

@@ -62,14 +62,15 @@ class MainDialog : public QDialog {
   using list_iterator = korrelator::token_list_t::iterator;
 
 signals:
-  void newOrderDetected(korrelator::cross_over_data_t const &,
-                        korrelator::model_data_t const &);
+  void newOrderDetected(korrelator::cross_over_data_t,
+                        korrelator::model_data_t);
 
 public:
   MainDialog(QWidget *parent = nullptr);
   ~MainDialog();
 
 private:
+  void registerCustomTypes();
   void getSpotsTokens(exchange_name_e const, callback_t = nullptr);
   void getFuturesTokens(exchange_name_e const, callback_t = nullptr);
   void sendNetworkRequest(QUrl const &url, callback_t, trade_type_e const,
@@ -93,14 +94,15 @@ private:
   void populateUIComponents();
   void connectAllUISignals();
   bool validateUserInput();
-  void generateJsonFile(korrelator::cross_over_data_t const &,
-                        korrelator::model_data_t const &);
+  void generateJsonFile(korrelator::model_data_t const &);
   void onApplyButtonClicked();
-  int getTimerTickMilliseconds() const;
+  int  getTimerTickMilliseconds() const;
   double getIntegralValue(QLineEdit *lineEdit);
   double getMaxPlotsInVisibleRegion() const;
   void updateGraphData(double const key, bool const);
   void setupOrderTableModel();
+  void onNewOrderDetected(korrelator::cross_over_data_t,
+                          korrelator::model_data_t);
   void onNewPriceReceived(QString const &, double const price,
                           exchange_name_e const exchange, trade_type_e const tt);
   Qt::Alignment getLegendAlignment() const;
@@ -133,8 +135,7 @@ private:
   korrelator::price_updater_t m_priceUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
-  korrelator::exchange_name_e m_currentExchange;
-
+  korrelator::trade_action_e m_lastTradeAction;
   double m_threshold = 0.0;
   double m_specialRef = std::numeric_limits<double>::max();
   double m_resetPercentage = m_specialRef;

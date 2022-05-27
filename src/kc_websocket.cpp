@@ -84,7 +84,6 @@ kucoin_ws::~kucoin_ws() {
   m_instanceServers.clear();
   m_websocketToken.clear();
   m_subscriptionString.clear();
-  qDebug() << "KuCoin websocket destroyed";
 }
 
 void kucoin_ws::restApiInitiateConnection() {
@@ -353,7 +352,6 @@ void kucoin_ws::performWebsocketHandshake() {
 
   auto const path = m_uri.path() + "?token=" + m_websocketToken +
                     "&connectId=" + get_random_string(10);
-  qDebug() << path.c_str();
   m_sslWebStream->async_handshake(m_uri.host(), path,
                                   [this](auto const errorCode) {
                                     if (errorCode) {
@@ -365,7 +363,6 @@ void kucoin_ws::performWebsocketHandshake() {
 }
 
 void kucoin_ws::waitForMessages() {
-  // m_readWriteBuffer.emplace();
   resetBuffer();
   m_sslWebStream->async_read(
       m_readWriteBuffer,
@@ -415,6 +412,7 @@ void kucoin_ws::makeSubscription() {
             .arg((m_isSpotTrade ? "market" : "contractMarket"),
                  m_tokenList)
             .toStdString();
+    qDebug() << m_subscriptionString.c_str();
   }
 
   m_sslWebStream->async_write(net::buffer(m_subscriptionString),
