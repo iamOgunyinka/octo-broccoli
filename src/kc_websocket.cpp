@@ -40,14 +40,14 @@ double kuCoinGetCoinPrice(char const *str, size_t const size,
   auto const jsonObject = d.GetObject();
   auto iter = jsonObject.FindMember("data");
   if (iter == jsonObject.end())
-    return NAN;
+    return -1.0;
   auto const dataObject = iter->value.GetObject();
   if (isSpot) {
     auto const priceIter = dataObject.FindMember("price");
     if (priceIter == dataObject.MemberEnd() ||
         (priceIter->value.GetType() != rapidjson::Type::kStringType)) {
       assert(false);
-      return NAN;
+      return -1.0;
     }
     return std::stod(priceIter->value.GetString());
   } else {
@@ -58,19 +58,20 @@ double kuCoinGetCoinPrice(char const *str, size_t const size,
         bestBidIter->value.GetType() != rapidjson::Type::kStringType ||
         bestAskIter->value.GetType() != rapidjson::Type::kStringType) {
       assert(false);
-      return NAN;
+      return -1.0;
     }
     auto const bidPrice = std::stod(bestBidIter->value.GetString());
     auto const askPrice = std::stod(bestAskIter->value.GetString());
     return (bidPrice + askPrice) / 2.0;
   }
-  return NAN;
+  return -1.0;
 }
 
 kucoin_ws::kucoin_ws(net::io_context &ioContext, ssl::context &sslContext,
-                     trade_type_e const tradeType)
+                     double& priceResult, trade_type_e const tradeType)
     : m_ioContext(ioContext)
     , m_sslContext(sslContext)
+    , m_priceResult(priceResult)
     , m_tradeType(tradeType)
     , m_isSpotTrade(tradeType == trade_type_e::spot)
 {
@@ -388,10 +389,9 @@ void kucoin_ws::interpretGenericMessages() {
   size_t const dataLength = m_readWriteBuffer.size();
   auto const optPrice =
       kuCoinGetCoinPrice(bufferCstr, dataLength, m_isSpotTrade);
-  if (!isnan(optPrice))
-    emit onNewPriceAvailable(m_tokenList, optPrice,
-                             exchange_name_e::kucoin,
-                             m_tradeType);
+  if (optPrice != -1.0)
+      m_priceResult = optPrice;
+
   if (!m_tokensSubscribedFor)
     return makeSubscription();
   return waitForMessages();
@@ -412,7 +412,6 @@ void kucoin_ws::makeSubscription() {
             .arg((m_isSpotTrade ? "market" : "contractMarket"),
                  m_tokenList)
             .toStdString();
-    qDebug() << m_subscriptionString.c_str();
   }
 
   m_sslWebStream->async_write(net::buffer(m_subscriptionString),

@@ -103,8 +103,7 @@ private:
   void setupOrderTableModel();
   void onNewOrderDetected(korrelator::cross_over_data_t,
                           korrelator::model_data_t);
-  void onNewPriceReceived(QString const &, double const price,
-                          exchange_name_e const exchange, trade_type_e const tt);
+  void calculatePriceNormalization();
   Qt::Alignment getLegendAlignment() const;
   list_iterator find(korrelator::token_list_t &container, QString const &,
                      trade_type_e const, exchange_name_e const);

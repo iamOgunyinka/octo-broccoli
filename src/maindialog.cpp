@@ -58,8 +58,10 @@ korrelator::exchange_name_e stringToExchangeName(QString const &name) {
   return korrelator::exchange_name_e::none;
 }
 
-void updateTokenIter(token_list_t::iterator iter, double const price) {
-  auto &value = *iter;
+void updateTokenIter(token_list_t::value_type & value) {
+  if (value.tokenName.length() == 1)
+    return;
+  auto const price = value.realPrice;
   if (value.calculatingNewMinMax) {
     value.minPrice = price * 0.75;
     value.maxPrice = price * 1.25;
@@ -70,7 +72,6 @@ void updateTokenIter(token_list_t::iterator iter, double const price) {
   value.maxPrice = std::max(value.maxPrice, price);
   value.normalizedPrice =
       (price - value.minPrice) / (value.maxPrice - value.minPrice);
-  value.realPrice = price;
 }
 
 QSslConfiguration getSSLConfig() {
@@ -793,15 +794,15 @@ void MainDialog::getInitialTokenPrices() {
   static size_t numberOfRecursions = 0;
 
   auto normalizePrice = [this](auto &list, auto &result, auto const tt) {
-    for (auto listIter = list.begin(); listIter != list.end(); ++listIter) {
-      auto &value = *listIter;
+    for (auto &value: list) {
       if (value.tradeType != tt || value.tokenName.size() == 1)
         continue;
       auto iter =
           find(result, value.tokenName, value.tradeType, value.exchange);
       if (iter != result.end()) {
-        listIter->calculatingNewMinMax = true;
-        updateTokenIter(listIter, iter->realPrice);
+        value.realPrice = iter->realPrice;
+        value.calculatingNewMinMax = true;
+        updateTokenIter(value);
       }
     }
   };
@@ -927,23 +928,11 @@ void MainDialog::onOKButtonClicked() {
   getInitialTokenPrices();
 }
 
-void MainDialog::onNewPriceReceived(QString const &tokenName,
-                                    double const price,
-                                    exchange_name_e const exchange,
-                                    trade_type_e const tt) {
-  auto iter = find(m_tokens, tokenName, tt, exchange);
-  if (iter != m_tokens.end()) {
-    if (iter->realPrice == price)
-      return;
-    std::lock_guard<std::mutex> lock_g{m_mutex};
-    updateTokenIter(iter, price);
-  }
-
-  iter = find(m_refs, tokenName, tt, exchange);
-  if (iter != m_refs.end()) {
-    std::lock_guard<std::mutex> lock_g{m_mutex};
-    updateTokenIter(iter, price);
-  }
+void MainDialog::calculatePriceNormalization() {
+  for (auto &token: m_tokens)
+    korrelator::updateTokenIter(token);
+  for (auto& token: m_refs)
+    korrelator::updateTokenIter(token);
 }
 
 void MainDialog::startWebsocket() {
@@ -951,20 +940,17 @@ void MainDialog::startWebsocket() {
   m_priceUpdater.worker = std::make_unique<korrelator::Worker>([this] {
     m_websocket = std::make_unique<korrelator::websocket_manager>();
 
-    for (auto const &tokenInfo : m_refs) {
+    for (auto &tokenInfo : m_refs) {
       m_websocket->addSubscription(tokenInfo.tokenName, tokenInfo.tradeType,
-                                   tokenInfo.exchange);
+                                   tokenInfo.exchange, tokenInfo.realPrice);
     }
 
-    for (auto const &tokenInfo : m_tokens) {
+    for (auto &tokenInfo : m_tokens) {
       if (tokenInfo.tokenName.size() != 1)
         m_websocket->addSubscription(tokenInfo.tokenName, tokenInfo.tradeType,
-                                     tokenInfo.exchange);
+                                     tokenInfo.exchange, tokenInfo.realPrice);
     }
 
-    QObject::connect(m_websocket.get(),
-                     &korrelator::websocket_manager::onNewPriceAvailable, this,
-                     &MainDialog::onNewPriceReceived);
     m_websocket->startWatch();
   });
 
@@ -1199,7 +1185,7 @@ void MainDialog::onTimerTick() {
   bool const updatingMinMax = (key - korrelator::lastPoint) > 1.0;
   if (updatingMinMax)
     korrelator::lastPoint = key;
-
+  calculatePriceNormalization();
   updateGraphData(key, updatingMinMax);
 
   // make key axis range scroll right with the data at a constant range of 100

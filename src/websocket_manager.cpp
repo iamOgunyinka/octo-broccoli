@@ -51,7 +51,7 @@ websocket_manager::~websocket_manager() {
 
 void websocket_manager::addSubscription(QString const &tokenName,
                                  trade_type_e const tradeType,
-                                 exchange_name_e const exchange) {
+                                 exchange_name_e const exchange, double &result) {
   auto iter = m_checker.find(exchange);
   if (iter != m_checker.end()) {
     auto iter2 = std::find_if(
@@ -67,20 +67,12 @@ void websocket_manager::addSubscription(QString const &tokenName,
     m_checker[exchange].push_back({tradeType, tokenName});
   }
 
-  auto callback = [this](QString const &tokenName, double const price,
-                         exchange_name_e const exchange,
-                         trade_type_e const tradeType) {
-    emit onNewPriceAvailable(tokenName, price, exchange, tradeType);
-  };
-
   if (exchange == exchange_name_e::binance) {
-    auto sock = new binance_ws(*m_ioContext, m_sslContext, tradeType);
+    auto sock = new binance_ws(*m_ioContext, m_sslContext, result, tradeType);
     sock->addSubscription(tokenName.toLower());
-    QObject::connect(sock, &binance_ws::onNewPriceAvailable, this, callback);
     m_sockets.push_back(std::move(sock));
   } else if (exchange == exchange_name_e::kucoin) {
-    auto sock = new kucoin_ws(*m_ioContext, m_sslContext, tradeType);
-    QObject::connect(sock, &kucoin_ws::onNewPriceAvailable, this, callback);
+    auto sock = new kucoin_ws(*m_ioContext, m_sslContext, result, tradeType);
     sock->addSubscription(tokenName.toUpper());
     m_sockets.push_back(std::move(sock));
   }

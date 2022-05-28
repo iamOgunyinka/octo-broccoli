@@ -1,8 +1,9 @@
 #pragma once
 
-#include <QObject>
+#include <QString>
 #include <map>
 #include <variant>
+#include <vector>
 
 namespace boost {
 
@@ -30,8 +31,7 @@ class kucoin_ws;
 enum class trade_type_e;
 enum class exchange_name_e;
 
-class websocket_manager: public QObject {
-  Q_OBJECT
+class websocket_manager {
 
   struct exchange_trade_pair {
     trade_type_e tradeType;
@@ -43,13 +43,8 @@ public:
   websocket_manager();
   ~websocket_manager();
   void addSubscription(QString const &tokenName, trade_type_e const tradeType,
-                       exchange_name_e const exchange);
+                       exchange_name_e const exchange, double& result);
   void startWatch();
-
-signals:
-  void onNewPriceAvailable(QString const &tokenName, double const,
-                           korrelator::exchange_name_e const,
-                           korrelator::trade_type_e const);
 
 private:
   net::ssl::context &m_sslContext;

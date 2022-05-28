@@ -1,13 +1,12 @@
 #pragma once
 
-#include <QObject>
+#include <QString>
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/ssl/ssl_stream.hpp>
 #include <boost/beast/websocket/stream.hpp>
 
-#include <functional>
 #include <optional>
 
 #include "utils.hpp"
@@ -34,12 +33,7 @@ namespace net = boost::asio;
 namespace beast = boost::beast;
 namespace ip = net::ip;
 
-using price_callback =
-    std::function<void(QString const &, double const, trade_type_e const)>;
-
-class binance_ws : public QObject {
-
-  Q_OBJECT
+class binance_ws {
 
   using resolver_result_type = net::ip::tcp::resolver::results_type;
 
@@ -55,12 +49,12 @@ public:
   using results_type = resolver::results_type;
 
   binance_ws(net::io_context &ioContext, net::ssl::context &sslContext,
-                trade_type_e const tradeType)
-      : m_tradeType(tradeType)
-      , m_host(m_tradeType == trade_type_e::spot ? spot_url : futures_url)
-      , m_port(m_tradeType == trade_type_e::spot ? spot_port : futures_port)
+             double& priceResult, trade_type_e const tradeType)
+      : m_host(tradeType == trade_type_e::spot ? spot_url : futures_url)
+      , m_port(tradeType == trade_type_e::spot ? spot_port : futures_port)
       , m_ioContext(ioContext)
-      , m_sslContext(sslContext){}
+      , m_sslContext(sslContext)
+      , m_priceResult(priceResult) {}
 
   ~binance_ws();
   void startFetching();
@@ -69,11 +63,6 @@ public:
     m_tokenName = internal_address_t{tokenName, false};
   }
 
-signals:
-  void onNewPriceAvailable(QString const &tokenName,
-                           double const,
-                           korrelator::exchange_name_e const,
-                           korrelator::trade_type_e const);
 private:
   binance_ws *shared_from_this() { return this; }
   void interpretGenericMessages();
@@ -85,7 +74,6 @@ private:
   void makeSubscription();
 
 private:
-  trade_type_e const m_tradeType;
   std::string const m_host;
   std::string const m_port;
   net::io_context &m_ioContext;
@@ -96,6 +84,7 @@ private:
       m_sslWebStream;
   std::optional<beast::flat_buffer> m_readBuffer;
   std::string m_writeBuffer;
+  double& m_priceResult;
   bool m_requestedToStop = false;
 };
 

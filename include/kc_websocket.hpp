@@ -1,7 +1,6 @@
 #pragma once
 
-#include <QObject>
-
+#include <QString>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/http/string_body.hpp>
@@ -47,25 +46,19 @@ enum class trade_type_e;
 enum class exchange_name_e;
 
 // kucoin websocket
-class kucoin_ws : public QObject {
+class kucoin_ws {
 
-  Q_OBJECT
   using resolver = ip::tcp::resolver;
   using results_type = resolver::results_type;
 
 public:
   kucoin_ws(net::io_context &ioContext, ssl::context &sslContext,
-            trade_type_e const);
+            double& result, trade_type_e const);
   ~kucoin_ws();
   void addSubscription(QString const &);
   void startFetching() { restApiInitiateConnection(); }
   void requestStop() { m_requestedToStop = true; }
 
-signals:
-  void onNewPriceAvailable(QString const &tokenName,
-                           double const,
-                           korrelator::exchange_name_e const,
-                           korrelator::trade_type_e const);
 private:
   void restApiSendRequest();
   void restApiReceiveResponse();
@@ -86,6 +79,7 @@ private:
 
   net::io_context &m_ioContext;
   ssl::context &m_sslContext;
+  double &m_priceResult;
   std::optional<resolver> m_resolver;
   std::optional<ws::stream<beast::ssl_stream<beast::tcp_stream>>>
       m_sslWebStream;

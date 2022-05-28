@@ -143,9 +143,8 @@ void binance_ws::interpretGenericMessages() {
   char const *bufferCstr =
       static_cast<char const *>(m_readBuffer->cdata().data());
   auto const optPrice = binanceGetCoinPrice(bufferCstr, m_readBuffer->size());
-  if (!isnan(optPrice))
-    emit onNewPriceAvailable(m_tokenName.tokenName, optPrice,
-                             exchange_name_e::binance, m_tradeType);
+  if (optPrice != -1.0)
+      m_priceResult = optPrice;
 
   if (!m_tokenName.subscribed)
     return makeSubscription();
@@ -189,12 +188,12 @@ double binanceGetCoinPrice(char const *str, size_t const size) {
     auto const jsonObject = d.GetObject();
     auto iter = jsonObject.FindMember("data");
     if (iter == jsonObject.end())
-      return NAN;
+      return -1.0;
     auto const dataObject = iter->value.GetObject();
     auto const typeIter = dataObject.FindMember("e");
     if (typeIter == dataObject.MemberEnd()) {
       Q_ASSERT(false);
-      return NAN;
+      return -1.0;
     }
 
     std::string const type = typeIter->value.GetString();
@@ -209,9 +208,9 @@ double binanceGetCoinPrice(char const *str, size_t const size) {
       return amount;
     }
   } catch (...) {
-    return NAN;
+    return -1.0;
   }
-  return NAN;
+  return -1.0;
 }
 
 }
