@@ -16,7 +16,6 @@ struct cross_over_data_t {
   double price = 0.0;
   trade_action_e action = trade_action_e::do_nothing;
   QString time;
-  cross_over_data_t() = default;
 };
 
 class token_t {

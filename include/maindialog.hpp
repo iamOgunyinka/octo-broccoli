@@ -11,6 +11,7 @@
 #include "order_model.hpp"
 #include "sthread.hpp"
 #include "tokens.hpp"
+#include "settingsdialog.hpp"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -63,13 +64,15 @@ class MainDialog : public QDialog {
 
 signals:
   void newOrderDetected(korrelator::cross_over_data_t,
-                        korrelator::model_data_t);
+                        korrelator::model_data_t,
+                        exchange_name_e const, trade_type_e const);
 
 public:
   MainDialog(QWidget *parent = nullptr);
   ~MainDialog();
 
 private:
+  void onSettingsDialogClicked();
   void registerCustomTypes();
   void getSpotsTokens(exchange_name_e const, callback_t = nullptr);
   void getFuturesTokens(exchange_name_e const, callback_t = nullptr);
@@ -102,7 +105,8 @@ private:
   void updateGraphData(double const key, bool const);
   void setupOrderTableModel();
   void onNewOrderDetected(korrelator::cross_over_data_t,
-                          korrelator::model_data_t);
+                          korrelator::model_data_t,
+                          exchange_name_e const, trade_type_e const);
   void calculatePriceNormalization();
   Qt::Alignment getLegendAlignment() const;
   list_iterator find(korrelator::token_list_t &container, QString const &,
@@ -116,6 +120,16 @@ private:
                                                     double const keyEnd,
                                                     bool const updateGraph);
 
+  void sendExchangeRequest(exchange_name_e const, trade_type_e const tradeType,
+                           korrelator::cross_over_data_t const &);
+  void tradeBinanceSpot(korrelator::cross_over_data_t const &,
+                        korrelator::api_data_t const &);
+  void tradeKuCoinSpot(korrelator::cross_over_data_t const &,
+                       korrelator::api_data_t const &);
+  void tradeBinanceFutures(korrelator::cross_over_data_t const &,
+                           korrelator::api_data_t const &);
+  void tradeKuCoinFutures(korrelator::cross_over_data_t const &,
+                          korrelator::api_data_t const &);
 private:
   Ui::MainDialog *ui;
 
@@ -124,6 +138,7 @@ private:
   std::unique_ptr<korrelator::order_model> m_model = nullptr;
 
   QMap<int, korrelator::watchable_data_t> m_watchables;
+  SettingsDialog::api_data_map_t m_apiTradeApiMap;
   korrelator::token_list_t m_tokens;
   korrelator::token_list_t m_refs;
 

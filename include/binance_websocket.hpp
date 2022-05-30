@@ -9,6 +9,7 @@
 
 #include <optional>
 
+#include "constants.hpp"
 #include "utils.hpp"
 
 namespace boost {
@@ -23,9 +24,9 @@ class context;
 
 class io_context;
 
-}
+} // namespace asio
 
-}
+} // namespace boost
 
 namespace korrelator {
 
@@ -36,12 +37,6 @@ namespace ip = net::ip;
 class binance_ws {
 
   using resolver_result_type = net::ip::tcp::resolver::results_type;
-
-  static char const *const futures_url;
-  static char const *const spot_url;
-  static char const *const spot_port;
-  static char const *const futures_port;
-
   using address_list_t = std::vector<internal_address_t>;
 
 public:
@@ -49,16 +44,19 @@ public:
   using results_type = resolver::results_type;
 
   binance_ws(net::io_context &ioContext, net::ssl::context &sslContext,
-             double& priceResult, trade_type_e const tradeType)
-      : m_host(tradeType == trade_type_e::spot ? spot_url : futures_url)
-      , m_port(tradeType == trade_type_e::spot ? spot_port : futures_port)
-      , m_ioContext(ioContext)
-      , m_sslContext(sslContext)
-      , m_priceResult(priceResult) {}
+             double &priceResult, trade_type_e const tradeType)
+      : m_host(tradeType == trade_type_e::spot
+                   ? constants::binance_ws_spot_url
+                   : constants::binance_ws_futures_url),
+        m_port(tradeType == trade_type_e::spot
+                   ? constants::binance_ws_spot_port
+                   : constants::binance_ws_futures_port),
+        m_ioContext(ioContext), m_sslContext(sslContext),
+        m_priceResult(priceResult) {}
 
   ~binance_ws();
   void startFetching();
-  void requestStop(){ m_requestedToStop = true; }
+  void requestStop() { m_requestedToStop = true; }
   void addSubscription(QString const &tokenName) {
     m_tokenName = internal_address_t{tokenName, false};
   }
@@ -84,10 +82,10 @@ private:
       m_sslWebStream;
   std::optional<beast::flat_buffer> m_readBuffer;
   std::string m_writeBuffer;
-  double& m_priceResult;
+  double &m_priceResult;
   bool m_requestedToStop = false;
 };
 
 double binanceGetCoinPrice(char const *str, size_t const size);
 
-}
+} // namespace korrelator

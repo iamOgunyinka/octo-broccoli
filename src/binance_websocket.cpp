@@ -8,10 +8,6 @@
 #include <rapidjson/document.h>
 
 namespace korrelator {
-char const *const binance_ws::futures_url = "fstream.binance.com";
-char const *const binance_ws::spot_url = "stream.binance.com";
-char const *const binance_ws::spot_port = "9443";
-char const *const binance_ws::futures_port = "443";
 
 binance_ws::~binance_ws() {
   m_resolver.reset();
@@ -143,8 +139,11 @@ void binance_ws::interpretGenericMessages() {
   char const *bufferCstr =
       static_cast<char const *>(m_readBuffer->cdata().data());
   auto const optPrice = binanceGetCoinPrice(bufferCstr, m_readBuffer->size());
-  if (optPrice != -1.0)
-      m_priceResult = optPrice;
+  if (optPrice != -1.0) {
+    m_priceResult = optPrice;
+
+    qDebug() << "Binance" << m_tokenName.tokenName << m_priceResult;
+  }
 
   if (!m_tokenName.subscribed)
     return makeSubscription();
@@ -161,7 +160,9 @@ void binance_ws::makeSubscription() {
         "%1@aggTrade"
       ],
       "id": 10
-    })").arg(m_tokenName.tokenName).toStdString();
+    })")
+                      .arg(m_tokenName.tokenName)
+                      .toStdString();
 
   m_sslWebStream->async_write(
       net::buffer(m_writeBuffer),
@@ -213,4 +214,4 @@ double binanceGetCoinPrice(char const *str, size_t const size) {
   return -1.0;
 }
 
-}
+} // namespace korrelator

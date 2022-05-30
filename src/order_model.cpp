@@ -11,18 +11,20 @@ QVariant order_model::headerData(int section, Qt::Orientation orientation,
   if (orientation == Qt::Horizontal) {
     switch (section) {
     case 0:
-      return "Symbol";
+      return "Exchange";
     case 1:
-      return "Market type";
+      return "Symbol";
     case 2:
-      return "Signal price";
+      return "Market type";
     case 3:
-      return "Signal date/time";
+      return "Signal price";
     case 4:
-      return "Open price";
+      return "Signal date/time";
     case 5:
-      return "Open date/time";
+      return "Open price";
     case 6:
+      return "Open date/time";
+    case 7:
       return "Side";
     default:
       return QVariant{};
@@ -40,7 +42,7 @@ int order_model::rowCount(const QModelIndex &parent) const {
 int order_model::columnCount(const QModelIndex &parent) const {
   if (parent.isValid())
     return 0;
-  return 7;
+  return 8;
 }
 
 QVariant order_model::data(const QModelIndex &index, int role) const {
@@ -51,18 +53,20 @@ QVariant order_model::data(const QModelIndex &index, int role) const {
     auto const &d = m_modelData[index.row()];
     switch (index.column()) {
     case 0:
-      return d.symbol;
+      return d.exchange;
     case 1:
-      return d.marketType;
+      return d.symbol;
     case 2:
-      return d.signalPrice;
+      return d.marketType;
     case 3:
-      return d.signalTime;
+      return d.signalPrice;
     case 4:
-      return d.openPrice;
+      return d.signalTime;
     case 5:
-      return d.openTime;
+      return d.openPrice;
     case 6:
+      return d.openTime;
+    case 7:
       return d.side;
     default:
       return QVariant{};

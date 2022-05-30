@@ -6,6 +6,7 @@
 #include <random>
 #include <rapidjson/document.h>
 
+#include "constants.hpp"
 #include "utils.hpp"
 
 #ifdef _MSC_VER
@@ -13,24 +14,6 @@
 #endif
 
 namespace korrelator {
-
-static char const *const kc_spot_api_url = "api.kucoin.com";
-static char const *const kc_spot_http_request =
-    "POST /api/v1/bullet-public HTTP/1.1\r\n"
-    "Host: api.kucoin.com\r\n"
-    "Accept: */*\r\n"
-    "Content-Type: application/json\r\n"
-    "User-Agent: postman\r\n\r\n";
-
-static size_t const spot_http_request_len = strlen(kc_spot_http_request);
-static char const *const kc_futures_api_url = "api-futures.kucoin.com";
-static char const *const kc_futures_http_request =
-    "POST /api/v1/bullet-public HTTP/1.1\r\n"
-    "Host: api-futures.kucoin.com\r\n"
-    "Accept: */*\r\n"
-    "Content-Type: application/json\r\n"
-    "User-Agent: postman\r\n\r\n";
-static size_t const futures_http_request_len = strlen(kc_futures_http_request);
 
 double kuCoinGetCoinPrice(char const *str, size_t const size,
                           bool const isSpot) {
@@ -68,14 +51,10 @@ double kuCoinGetCoinPrice(char const *str, size_t const size,
 }
 
 kucoin_ws::kucoin_ws(net::io_context &ioContext, ssl::context &sslContext,
-                     double& priceResult, trade_type_e const tradeType)
-    : m_ioContext(ioContext)
-    , m_sslContext(sslContext)
-    , m_priceResult(priceResult)
-    , m_tradeType(tradeType)
-    , m_isSpotTrade(tradeType == trade_type_e::spot)
-{
-}
+                     double &priceResult, trade_type_e const tradeType)
+    : m_ioContext(ioContext), m_sslContext(sslContext),
+      m_priceResult(priceResult), m_tradeType(tradeType),
+      m_isSpotTrade(tradeType == trade_type_e::spot) {}
 
 kucoin_ws::~kucoin_ws() {
   m_resolver.reset();
@@ -95,7 +74,8 @@ void kucoin_ws::restApiInitiateConnection() {
   m_websocketToken.clear();
   m_tokensSubscribedFor = false;
 
-  auto const url = m_isSpotTrade ? kc_spot_api_url : kc_futures_api_url;
+  auto const url = m_isSpotTrade ? constants::kucoin_https_spot_host
+                                 : constants::kc_futures_api_url;
   m_resolver.emplace(m_ioContext);
   m_resolver->async_resolve(
       url, "https",
@@ -127,7 +107,8 @@ void kucoin_ws::restApiConnectToResolvedNames(
 }
 
 void kucoin_ws::restApiPerformSSLHandshake() {
-  auto const url = m_isSpotTrade ? kc_spot_api_url : kc_futures_api_url;
+  auto const url = m_isSpotTrade ? constants::kucoin_https_spot_host
+                                 : constants::kc_futures_api_url;
 
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(15));
@@ -150,10 +131,12 @@ void kucoin_ws::restApiPerformSSLHandshake() {
 }
 
 void kucoin_ws::restApiSendRequest() {
-  char const *const request =
-      m_isSpotTrade ? kc_spot_http_request : kc_futures_http_request;
-  size_t const request_len =
-      m_isSpotTrade ? spot_http_request_len : futures_http_request_len;
+  char const *const request = m_isSpotTrade
+                                  ? constants::kc_spot_http_request
+                                  : constants::kc_futures_http_request;
+  size_t const request_len = m_isSpotTrade
+                                 ? constants::spot_http_request_len
+                                 : constants::futures_http_request_len;
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(10));
   m_sslWebStream->next_layer().async_write_some(
@@ -339,17 +322,13 @@ void kucoin_ws::performWebsocketHandshake() {
   m_sslWebStream->set_option(opt);
 
   m_sslWebStream->control_callback(
-        [this](beast::websocket::frame_type const frameType,
-               boost::string_view const &payload) {
-    if (frameType == ws::frame_type::close) {
-      m_sslWebStream.reset();
-      return restApiInitiateConnection();
-    } else if (frameType == ws::frame_type::pong) {
-      qDebug() << "pong" << QString::fromStdString(payload.to_string());
-    } else if (frameType == ws::frame_type::ping) {
-      qDebug() << "ping" << QString::fromStdString(payload.to_string());
-    }
-  });
+      [this](beast::websocket::frame_type const frameType,
+             boost::string_view const &) {
+        if (frameType == ws::frame_type::close) {
+          m_sslWebStream.reset();
+          return restApiInitiateConnection();
+        }
+      });
 
   auto const path = m_uri.path() + "?token=" + m_websocketToken +
                     "&connectId=" + get_random_string(10);
@@ -389,8 +368,11 @@ void kucoin_ws::interpretGenericMessages() {
   size_t const dataLength = m_readWriteBuffer.size();
   auto const optPrice =
       kuCoinGetCoinPrice(bufferCstr, dataLength, m_isSpotTrade);
-  if (optPrice != -1.0)
-      m_priceResult = optPrice;
+  if (optPrice != -1.0) {
+    m_priceResult = optPrice;
+
+    qDebug() << "KuCoin" << m_tokenList << m_priceResult;
+  }
 
   if (!m_tokensSubscribedFor)
     return makeSubscription();
@@ -409,8 +391,7 @@ void kucoin_ws::makeSubscription() {
     m_subscriptionString =
         QString(subscriptionFormat)
             .arg(get_random_integer())
-            .arg((m_isSpotTrade ? "market" : "contractMarket"),
-                 m_tokenList)
+            .arg((m_isSpotTrade ? "market" : "contractMarket"), m_tokenList)
             .toStdString();
   }
 

@@ -6,17 +6,28 @@ CONFIG += c++17
 INCLUDEPATH += "include"
 INCLUDEPATH += "third-party/rapidjson/include"
 INCLUDEPATH += "E:\\boost_1_78_0\\include" \
-               "E:\\vcpkg\\installed\\x64-windows\\include"
+               "E:\\vcpkg\\installed\\x64-windows\\include" \
+               "E:\\libsodium\\include"
 
-win32:LIBS += "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libcrypto.lib" \
-              "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libssl.lib"
+Debug:LIBS += "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libcrypto.lib" \
+              "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libssl.lib" \
+              "E:\\libsodium\\debug\\lib\\libsodium.lib"
+
+Release:LIBS += "E:\\vcpkg\\installed\\x64-windows\\lib\\libcrypto.lib" \
+              "E:\\vcpkg\\installed\\x64-windows\\lib\\libssl.lib" \
+              "E:\\libsodium\\lib\\libsodium.lib"
 
 QMAKE_CXXFLAGS += -bigobj
+
 # You can make your code fail to compile if it uses deprecated APIs.
 # In order to do so, uncomment the following line.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
+  src/constants.cpp \
+  src/crypto.cpp \
+  src/https_request.cpp \
+  src/settingsdialog.cpp \
   src/binance_websocket.cpp \
   src/kc_websocket.cpp \
   src/maindialog.cpp \
@@ -27,7 +38,10 @@ SOURCES += main.cpp \
 
 HEADERS += \
   include/binance_websocket.hpp \
+  include/constants.hpp \
   include/container.hpp \
+  include/crypto.hpp \
+  include/https_request.hpp \
   include/kc_websocket.hpp \
   include/maindialog.hpp \
   include/order_model.hpp \
@@ -36,9 +50,11 @@ HEADERS += \
   include/uri.hpp \
   include/utils.hpp \
   include/tokens.hpp \
-  include/websocket_manager.hpp
+  include/websocket_manager.hpp \
+  include/settingsdialog.hpp
 
 FORMS += \
+    ui/settingsdialog.ui \
     ui/maindialog.ui
 
 # Default rules for deployment.

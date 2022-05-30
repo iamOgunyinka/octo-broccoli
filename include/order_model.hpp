@@ -7,6 +7,7 @@
 namespace korrelator {
 
 struct model_data_t {
+  QString exchange;
   QString symbol;
   QString marketType;
   QString signalTime;

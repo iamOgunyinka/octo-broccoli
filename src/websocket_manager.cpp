@@ -30,7 +30,6 @@ net::ssl::context &getSSLContext() {
   return *ssl_context;
 }
 
-
 websocket_manager::websocket_manager() : m_sslContext(getSSLContext()) {
   getRawIOContext().reset();
   m_ioContext = getIOContext();
@@ -40,18 +39,21 @@ websocket_manager::~websocket_manager() {
   m_ioContext->stop();
 
   for (auto &sock : m_sockets) {
-    std::visit([](auto && v) {
-      v->requestStop();
-      delete v;
-    }, sock);
+    std::visit(
+        [](auto &&v) {
+          v->requestStop();
+          delete v;
+        },
+        sock);
   }
 
   m_sockets.clear();
 }
 
 void websocket_manager::addSubscription(QString const &tokenName,
-                                 trade_type_e const tradeType,
-                                 exchange_name_e const exchange, double &result) {
+                                        trade_type_e const tradeType,
+                                        exchange_name_e const exchange,
+                                        double &result) {
   auto iter = m_checker.find(exchange);
   if (iter != m_checker.end()) {
     auto iter2 = std::find_if(
@@ -82,12 +84,14 @@ void websocket_manager::startWatch() {
   m_checker.clear();
 
   for (auto &sock : m_sockets) {
-    std::visit([this](auto && v) mutable {
-      std::thread([this, &v]() mutable {
-        v->startFetching();
-        m_ioContext->run();
-      }).detach();
-    }, sock);
+    std::visit(
+        [this](auto &&v) mutable {
+          std::thread([this, &v]() mutable {
+            v->startFetching();
+            m_ioContext->run();
+          }).detach();
+        },
+        sock);
   }
 }
 
