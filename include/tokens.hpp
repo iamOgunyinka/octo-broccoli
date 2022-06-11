@@ -13,15 +13,19 @@ class QCPLayoutGrid;
 namespace korrelator {
 
 struct cross_over_data_t {
-  double price = 0.0;
+  double signalPrice = 0.0;
+  double openPrice = 0.0;
   trade_action_e action = trade_action_e::do_nothing;
   QString time;
 };
 
 class token_t {
-  friend class token_proxy_iter;
-
 public:
+  int8_t pricePrecision = -1;
+  int8_t quantityPrecision = pricePrecision;
+  int8_t baseAssetPrecision = pricePrecision;
+  int8_t quotePrecision = pricePrecision;
+
   double minPrice = std::numeric_limits<double>::max();
   double maxPrice = -1 * std::numeric_limits<double>::max();
   double prevNormalizedPrice = std::numeric_limits<double>::max();

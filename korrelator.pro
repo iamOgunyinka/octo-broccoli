@@ -6,16 +6,15 @@ CONFIG += c++17
 INCLUDEPATH += "include"
 INCLUDEPATH += "third-party/rapidjson/include"
 INCLUDEPATH += "E:\\boost_1_78_0\\include" \
-               "E:\\vcpkg\\installed\\x64-windows\\include" \
-               "E:\\libsodium\\include"
+               "E:\\vcpkg\\installed\\x64-windows\\include"
 
 Debug:LIBS += "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libcrypto.lib" \
               "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libssl.lib" \
-              "E:\\libsodium\\debug\\lib\\libsodium.lib"
+              "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libsodium.lib"
 
 Release:LIBS += "E:\\vcpkg\\installed\\x64-windows\\lib\\libcrypto.lib" \
               "E:\\vcpkg\\installed\\x64-windows\\lib\\libssl.lib" \
-              "E:\\libsodium\\lib\\libsodium.lib"
+              "E:\\vcpkg\\installed\\x64-windows\\lib\\libsodium.lib"
 
 QMAKE_CXXFLAGS += -bigobj
 

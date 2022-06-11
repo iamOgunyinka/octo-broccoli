@@ -1,8 +1,13 @@
 #include "crypto.hpp"
+
+#include <chrono>
 #include <limits>
 #include <openssl/hmac.h>
 #include <stdexcept>
 #include <cassert>
+#include <sstream>
+#include <iomanip>
+#include <QDateTime>
 
 namespace korrelator {
 
@@ -83,18 +88,29 @@ std::string base64_decode(std::string const &asc_data) {
   return ret_val;
 }
 
-std::basic_string<unsigned char> hmac256_encode(std::string const &data,
-                                                std::string const &key) {
+std::basic_string<unsigned char> hmac256_encode(
+    std::string const &data, std::string const &key, bool const decodeToHex) {
   HMAC_CTX *ctx = HMAC_CTX_new();
-  HMAC_Init_ex(ctx, key.c_str(), key.size(), EVP_sha256(), nullptr);
+  HMAC_Init_ex(ctx, key.c_str(), (int)key.size(), EVP_sha256(), nullptr);
   unsigned int len{};
   unsigned char out[EVP_MAX_MD_SIZE];
-  HMAC_Init(ctx, key.c_str(), key.length(), EVP_sha256());
+  HMAC_Init(ctx, key.c_str(), (int)key.length(), EVP_sha256());
   HMAC_Update(ctx, (unsigned char *)data.c_str(), data.length());
   HMAC_Final(ctx, out, &len);
   HMAC_CTX_free(ctx);
 
-  return std::basic_string<unsigned char>(out, len);
+  auto const hash = std::basic_string<unsigned char>(out, len);
+  if (!decodeToHex)
+    return hash;
+  std::stringstream ss;
+  for (int i = 0; i < hash.length(); i++)
+    ss << std::hex << std::setw(2) << std::setfill('0')
+       << (unsigned int)hash[i];
+  return reinterpret_cast<unsigned char *>(ss.str().data());
+}
+
+time_t getGMTTimeMs() {
+  return QDateTime::currentDateTimeUtc().toMSecsSinceEpoch();
 }
 
 } // namespace korrelator
