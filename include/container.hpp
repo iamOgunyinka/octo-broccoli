@@ -4,6 +4,7 @@
 #include <mutex>
 
 namespace korrelator {
+
 template <typename T, typename Container = std::deque<T>>
 struct waitable_container_t {
 private:

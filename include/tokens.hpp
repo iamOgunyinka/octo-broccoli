@@ -13,45 +13,56 @@ class QCPLayoutGrid;
 namespace korrelator {
 
 struct cross_over_data_t {
-  double price = 0.0;
-  trade_action_e action = trade_action_e::do_nothing;
+  double signalPrice = 0.0;
+  double openPrice = 0.0;
+  trade_action_e action = trade_action_e::nothing;
   QString time;
 };
 
 class token_t {
-  friend class token_proxy_iter;
-
 public:
+  bool calculatingNewMinMax = true;
+  bool crossedOver = false;
+
+  int8_t pricePrecision = -1;
+  int8_t quantityPrecision = pricePrecision;
+  int8_t baseAssetPrecision = pricePrecision;
+  int8_t quotePrecision = pricePrecision;
+
   double minPrice = std::numeric_limits<double>::max();
   double maxPrice = -1 * std::numeric_limits<double>::max();
   double prevNormalizedPrice = std::numeric_limits<double>::max();
   double alpha = 1.0;
   double normalizedPrice = 0.0;
   double realPrice = 0.0;
+  // double marketFeeRate = 0.0;
+  // double takerFeeRate = 0.0;
+
   qint64 graphPointsDrawnCount = 0;
-  std::optional<cross_over_data_t> crossOver;
-  QString tokenName;
-  QString legendName;
   QCPGraph *graph = nullptr;
-  bool calculatingNewMinMax = true;
-  bool crossedOver = false;
+
+  std::optional<cross_over_data_t> crossOver;
   trade_type_e tradeType;
   exchange_name_e exchange = exchange_name_e::none;
 
+  QString baseCurrency; // needed by KuCoin
+  QString quoteCurrency; // needed by KuCoin
+  QString symbolName;
+  QString legendName;
   void reset();
 };
 
 struct token_compare_t {
   bool operator()(QString const &tokenName, token_t const &t) const {
-    return tokenName.toUpper() < t.tokenName.toUpper();
+    return tokenName.toUpper() < t.symbolName.toUpper();
   }
   bool operator()(token_t const &t, QString const &tokenName) const {
-    return t.tokenName.toUpper() < tokenName.toUpper();
+    return t.symbolName.toUpper() < tokenName.toUpper();
   }
 
   bool operator()(token_t const &a, token_t const &b) const {
-    return std::tuple(a.tokenName.toUpper(), a.tradeType, a.exchange) <
-           std::tuple(b.tokenName.toUpper(), b.tradeType, b.exchange);
+    return std::tuple(a.symbolName.toUpper(), a.tradeType, a.exchange) <
+           std::tuple(b.symbolName.toUpper(), b.tradeType, b.exchange);
   }
 };
 

@@ -31,6 +31,9 @@ class kucoin_ws;
 enum class trade_type_e;
 enum class exchange_name_e;
 
+net::ssl::context &getSSLContext();
+net::io_context* getIOContext();
+
 class websocket_manager {
 
   struct exchange_trade_pair {

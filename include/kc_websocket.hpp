@@ -64,18 +64,17 @@ private:
   void restApiReceiveResponse();
   void restApiInitiateConnection();
   void restApiConnectToResolvedNames(results_type const &);
-  void restApiPerformSSLHandshake();
+  void restApiPerformSSLHandshake(int const port);
   void restApiInterpretHttpResponse();
 
   void negotiateWebsocketConnection();
   void initiateWebsocketConnection();
-  void websockPerformSSLHandshake(results_type::endpoint_type const &);
+  void websockPerformSSLHandshake();
   void websockConnectToResolvedNames(results_type const &);
   void performWebsocketHandshake();
   void waitForMessages();
   void interpretGenericMessages();
   void makeSubscription();
-  void resetBuffer();
 
   net::io_context &m_ioContext;
   ssl::context &m_sslContext;
@@ -84,7 +83,7 @@ private:
   std::optional<ws::stream<beast::ssl_stream<beast::tcp_stream>>>
       m_sslWebStream;
   std::optional<beast::http::response<beast::http::string_body>> m_response;
-  beast::flat_buffer m_readWriteBuffer;
+  std::optional<beast::flat_buffer> m_readWriteBuffer;
   std::vector<instance_server_data_t> m_instanceServers;
   std::string m_websocketToken;
   std::string m_subscriptionString;
@@ -95,9 +94,5 @@ private:
   bool m_tokensSubscribedFor = false;
   bool m_requestedToStop = false;
 };
-
-char get_random_char();
-std::string get_random_string(std::size_t);
-std::size_t get_random_integer();
 
 } // namespace korrelator

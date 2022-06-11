@@ -74,7 +74,22 @@ void websocket_manager::addSubscription(QString const &tokenName,
     sock->addSubscription(tokenName.toLower());
     m_sockets.push_back(std::move(sock));
   } else if (exchange == exchange_name_e::kucoin) {
-    auto sock = new kucoin_ws(*m_ioContext, m_sslContext, result, tradeType);
+#ifdef TESTNET
+    static std::unique_ptr<net::ssl::context> sslContext = nullptr;
+    if (!sslContext) {
+      sslContext =
+          std::make_unique<net::ssl::context>(net::ssl::context::sslv23_client);
+      sslContext->set_default_verify_paths();
+      sslContext->set_verify_mode(boost::asio::ssl::verify_none);
+    }
+#endif
+    auto sock = new kucoin_ws(*m_ioContext,
+#ifndef TESTNET
+                              m_sslContext,
+#else
+                              *sslContext,
+#endif
+                              result, tradeType);
     sock->addSubscription(tokenName.toUpper());
     m_sockets.push_back(std::move(sock));
   }
