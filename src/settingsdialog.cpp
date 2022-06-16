@@ -9,10 +9,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include "constants.hpp"
 #include "sodium.h"
-
-static char const * const encrypted_config_filename = "config/.config.dat";
-static char const * const config_json_filename = "config/config.json";
 
 SettingsDialog::SettingsDialog(QWidget *parent)
   : QDialog(parent)
@@ -173,11 +171,13 @@ void SettingsDialog::writeEncryptedFile(QByteArray const & payload) {
     return;
   }
 
-  QFile file{encrypted_config_filename};
+  using korrelator::constants;
+
+  QFile file{constants::encrypted_config_filename};
   if (file.exists())
     file.remove();
 
-  if (QFile f(config_json_filename); f.exists())
+  if (QFile f(constants::config_json_filename); f.exists())
     f.remove();
 
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -192,11 +192,12 @@ void SettingsDialog::writeEncryptedFile(QByteArray const & payload) {
 }
 
 void SettingsDialog::writeUnencryptedFile(QByteArray const & payload) {
-  QFile file{config_json_filename};
+  using korrelator::constants;
+  QFile file{constants::config_json_filename};
   if (file.exists())
     file.remove();
 
-  if (QFile f(encrypted_config_filename); f.exists())
+  if (QFile f(constants::encrypted_config_filename); f.exists())
     f.remove();
 
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -208,14 +209,15 @@ void SettingsDialog::writeUnencryptedFile(QByteArray const & payload) {
 }
 
 void SettingsDialog::readConfigurationFile() {
+  using korrelator::constants;
   {
     // priorities on unencrypted file, read this first
-    QFile unencyrptedFile(config_json_filename);
+    QFile unencyrptedFile(constants::config_json_filename);
     if (unencyrptedFile.exists() && unencyrptedFile.open(QIODevice::ReadOnly))
       return readUnencryptedData(unencyrptedFile.readAll());
   }
 
-  QFile encryptedFile(encrypted_config_filename);
+  QFile encryptedFile(constants::encrypted_config_filename);
   if (!encryptedFile.exists() || !encryptedFile.open(QIODevice::ReadOnly))
     return;
   return readEncryptedFile(encryptedFile);

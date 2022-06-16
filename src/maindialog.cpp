@@ -159,8 +159,8 @@ MainDialog::MainDialog(QWidget *parent)
                              "button to add new API information");
   }
 
-  std::thread{tradeBinanceToken}.detach();
-  std::thread{tradeKuCoinToken}.detach();
+  std::thread{[this]{ tradeBinanceToken(this, m_model); }}.detach();
+  std::thread{[this]{ tradeKuCoinToken(this, m_model); }}.detach();
 
   /*
   QTimer::singleShot(std::chrono::milliseconds(2000), this, [this] {
@@ -403,7 +403,7 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->reverseCheckBox->setEnabled(enabled);
   ui->oneOpCheckBox->setEnabled(enabled);
   ui->graphThicknessCombo->setEnabled(enabled);
-  ui->liveTradeCheckbox->setEnabled(enabled);
+  // ui->liveTradeCheckbox->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {
@@ -767,7 +767,7 @@ void MainDialog::saveTokensToFile() {
   if (ui->tokenListWidget->count() == 0)
     return;
 
-  QFile file{"./config/korrelator.json"};
+  QFile file{korrelator::constants::korrelator_json_filename};
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
     return;
 
@@ -812,19 +812,20 @@ void MainDialog::updateTradeConfigurationPrecisions() {
 }
 
 void MainDialog::readTokensFromFile() {
+  using korrelator::constants;
+
   QJsonArray jsonList;
   {
     if (QFileInfo::exists("brocolli.json"))
       QFile::rename("brocolli.json", "korrelator.json");
 
-    QDir().mkpath("config");
-
+    QDir().mkpath(constants::root_dir);
     if (QFile file("korrelator.json"); file.exists()) {
-      if (file.copy("korrelator.json", "config/korrelator.json"))
+      if (file.copy("korrelator.json", constants::korrelator_json_filename))
         file.remove("korrelator.json");
     }
 
-    QFile file{"config/korrelator.json"};
+    QFile file{constants::korrelator_json_filename};
     if (!file.open(QIODevice::ReadOnly))
       return;
     jsonList = QJsonDocument::fromJson(file.readAll()).array();
@@ -852,10 +853,10 @@ void MainDialog::readTokensFromFile() {
 }
 
 void MainDialog::readOrdersConfigFromFile() {
-  char const *const tradeConfigFilename = "config/trade.json";
+  using korrelator::constants;
   QByteArray fileContent;
   {
-    QFile file(tradeConfigFilename);
+    QFile file(constants::trade_json_filename);
     if (!file.exists() || !file.open(QIODevice::ReadOnly))
       return;
     fileContent = file.readAll();
@@ -1580,7 +1581,8 @@ void MainDialog::onSettingsDialogClicked() {
 }
 
 void MainDialog::sendExchangeRequest(
-    korrelator::model_data_t const &modelData, exchange_name_e const exchange,
+    korrelator::model_data_t const &modelData,
+    exchange_name_e const exchange,
     trade_type_e const tradeType,
     korrelator::cross_over_data_t const &crossOver) {
   auto iter = m_apiTradeApiMap.find(exchange);
@@ -1654,7 +1656,8 @@ void MainDialog::sendExchangeRequest(
   }
 }
 
-void MainDialog::tradeKuCoinToken() {
+void MainDialog::tradeKuCoinToken(
+    MainDialog* mainDialog, std::unique_ptr<korrelator::order_model>& model) {
   using korrelator::trade_action_e;
   using korrelator::trade_type_e;
 
@@ -1687,12 +1690,26 @@ void MainDialog::tradeKuCoinToken() {
       lastAction = kc_data.tradeConfig->side;
       lastQuantity = kc_data.tradeConfig->size * 2;
     }
+    auto const quantityPurchased = kcRequest.quantityPurchased();
+    auto const sizePurchased = kcRequest.sizePurchased();
+    korrelator::model_data_t* modelData = nullptr;
+    if (model)
+      modelData = model->front();
+    if (quantityPurchased != 0.0 && sizePurchased != 0.0) {
+      qDebug() << "Price:" << ((quantityPurchased * sizePurchased) / 0.01);
+    } else if (auto const errString = kcRequest.errorString();
+               !errString.isEmpty()){
+      qDebug() << errString;
+      if (modelData)
+        modelData->remark = errString;
+    }
 
     ioContext.stop();
   }
 }
 
-void MainDialog::tradeBinanceToken() {
+void MainDialog::tradeBinanceToken(
+    MainDialog*, std::unique_ptr<korrelator::order_model>& model) {
   using korrelator::trade_action_e;
   using korrelator::trade_type_e;
 

@@ -57,6 +57,7 @@ kucoin_ws::kucoin_ws(net::io_context &ioContext, ssl::context &sslContext,
       m_isSpotTrade(tradeType == trade_type_e::spot) {}
 
 kucoin_ws::~kucoin_ws() {
+  resetPingTimer();
   m_resolver.reset();
   m_sslWebStream.reset();
   m_readWriteBuffer.reset();
@@ -71,6 +72,7 @@ void kucoin_ws::restApiInitiateConnection() {
   if (m_requestedToStop)
     return;
 
+  resetPingTimer();
   m_websocketToken.clear();
   m_tokensSubscribedFor = false;
 
@@ -315,6 +317,7 @@ void kucoin_ws::negotiateWebsocketConnection() {
 }
 
 void kucoin_ws::performWebsocketHandshake() {
+  /*
   auto const &instanceData = m_instanceServers.back();
   auto opt = ws::stream_base::timeout();
   opt.idle_timeout = std::chrono::milliseconds(instanceData.pingTimeoutMs);
@@ -331,7 +334,7 @@ void kucoin_ws::performWebsocketHandshake() {
           return restApiInitiateConnection();
         }
       });
-
+  */
   auto const path = m_uri.path() + "?token=" + m_websocketToken +
                     "&connectId=" + get_random_string(10);
   m_sslWebStream->async_handshake(m_uri.host(), path,
@@ -340,8 +343,44 @@ void kucoin_ws::performWebsocketHandshake() {
                                       qDebug() << errorCode.message().c_str();
                                       return;
                                     }
+                                    startPingTimer();
                                     waitForMessages();
                                   });
+}
+
+void kucoin_ws::resetPingTimer() {
+  if (m_pingTimer) {
+    boost::system::error_code ec;
+    m_pingTimer->cancel(ec);
+    m_pingTimer.reset();
+  }
+}
+
+void kucoin_ws::onPingTimerTick(boost::system::error_code const &ec) {
+  if (ec) {
+    qDebug() << "Error" << ec.message().c_str();
+    return;
+  }
+
+  m_sslWebStream->async_ping({}, [this](boost::system::error_code const &){
+    auto const pingIntervalMs = m_instanceServers.back().pingIntervalMs;
+    m_pingTimer->expires_from_now(boost::posix_time::milliseconds(pingIntervalMs));
+    m_pingTimer->async_wait([this](boost::system::error_code const &errCode){
+      return onPingTimerTick(errCode);
+    });
+  });
+}
+
+void kucoin_ws::startPingTimer() {
+  resetPingTimer();
+  m_pingTimer.emplace(m_ioContext);
+
+  auto const pingIntervalMs = m_instanceServers.back().pingIntervalMs;
+  m_pingTimer->expires_from_now(
+        boost::posix_time::milliseconds(pingIntervalMs));
+  m_pingTimer->async_wait([this] (boost::system::error_code const &ec) {
+    onPingTimerTick(ec);
+  });
 }
 
 void kucoin_ws::waitForMessages() {

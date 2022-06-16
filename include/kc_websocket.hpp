@@ -6,6 +6,7 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/ssl/ssl_stream.hpp>
 #include <boost/beast/websocket/stream.hpp>
+#include <boost/asio/deadline_timer.hpp>
 
 #include <optional>
 #include "uri.hpp"
@@ -75,15 +76,19 @@ private:
   void waitForMessages();
   void interpretGenericMessages();
   void makeSubscription();
+  void startPingTimer();
+  void resetPingTimer();
+  void onPingTimerTick(boost::system::error_code const &);
 
   net::io_context &m_ioContext;
   ssl::context &m_sslContext;
-  double &m_priceResult;
+  double& m_priceResult;
   std::optional<resolver> m_resolver;
   std::optional<ws::stream<beast::ssl_stream<beast::tcp_stream>>>
       m_sslWebStream;
   std::optional<beast::http::response<beast::http::string_body>> m_response;
   std::optional<beast::flat_buffer> m_readWriteBuffer;
+  std::optional<net::deadline_timer> m_pingTimer;
   std::vector<instance_server_data_t> m_instanceServers;
   std::string m_websocketToken;
   std::string m_subscriptionString;

@@ -13,8 +13,10 @@ struct model_data_t {
   QString signalTime;
   QString openTime;
   QString side;
-  double signalPrice;
-  double openPrice;
+  QString remark;
+  double signalPrice = 0.0;
+  double openPrice = 0.0;
+  double exchangePrice = 0.0;
 };
 
 class order_model : public QAbstractTableModel {
@@ -35,7 +37,11 @@ public:
   bool insertRows(int row, int count,
                   const QModelIndex &parent = QModelIndex()) override;
   void AddData(model_data_t &&);
-
+  model_data_t* front() {
+    if (m_modelData.empty())
+      return nullptr;
+    return &m_modelData.front();
+  }
 private:
   std::deque<model_data_t> m_modelData;
 };

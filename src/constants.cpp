@@ -4,6 +4,13 @@
 namespace korrelator {
 
 #ifdef TESTNET
+char const * const constants::root_dir = "testnet_config";
+char const * const constants::korrelator_json_filename =
+    "testnet_config/korrelator.json";
+char const * const constants::trade_json_filename =
+    "testnet_config/trade.json";
+char const * const constants::encrypted_config_filename = "testnet_config/.config.dat";
+char const * const constants::config_json_filename = "testnet_config/config.json";
 char const *const constants::binance_ws_spot_url = "testnet.binance.vision";
 char const *const constants::binance_http_spot_host = "testnet.binance.vision";
 char const *const constants::binance_ws_spot_port = "443";
@@ -22,6 +29,13 @@ char const *const constants::kc_spot_http_request =
     "Content-Type: application/json\r\n"
     "User-Agent: postman\r\n\r\n";
 #else
+char const * const constants::root_dir = "config";
+char const * const constants::trade_json_filename =
+    "./config/trade.json";
+char const * const constants::korrelator_json_filename =
+    "./config/korrelator.json";
+char const * const constants::encrypted_config_filename = "config/.config.dat";
+char const * const constants::config_json_filename = "config/config.json";
 char const *const constants::binance_ws_spot_url = "stream.binance.com";
 char const *const constants::binance_http_spot_host = "api.binance.com";
 char const *const constants::binance_ws_spot_port = "9443";

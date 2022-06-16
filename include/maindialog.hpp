@@ -128,8 +128,10 @@ private:
   void sendExchangeRequest(korrelator::model_data_t const &,
                            exchange_name_e const, trade_type_e const tradeType,
                            korrelator::cross_over_data_t const &);
-  static void tradeBinanceToken();
-  static void tradeKuCoinToken();
+  static void tradeBinanceToken(
+      MainDialog*, std::unique_ptr<korrelator::order_model>&);
+  static void tradeKuCoinToken(
+      MainDialog*, std::unique_ptr<korrelator::order_model>&);
 
 private:
   Ui::MainDialog *ui;

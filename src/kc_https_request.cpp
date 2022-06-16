@@ -9,7 +9,7 @@
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
-
+#include <thread>
 #include "constants.hpp"
 #include "crypto.hpp"
 
@@ -31,16 +31,18 @@ void kc_https_plug::onDataSent(beast::error_code ec, std::size_t const) {
 }
 
 void kc_https_plug::receiveData() {
+  m_httpResponse.emplace();
   beast::get_lowest_layer(m_tcpStream)
       .expires_after(std::chrono::milliseconds(15000));
-  m_httpResponse.emplace();
   http::async_read(
       m_tcpStream, m_readBuffer, *m_httpResponse,
       [this](auto const &a, auto const &b) { onDataReceived(a, b); });
 }
 
 void kc_https_plug::doConnect() {
+  m_process = process_e::market_initiated;
   createRequestData();
+
   using resolver = tcp::resolver;
   auto const host = m_isSpot ? constants::kucoin_https_spot_host
                              : constants::kc_futures_api_host;
@@ -87,10 +89,10 @@ void kc_https_plug::createRequestData() {
 
   auto const marketType = m_tradeConfig->marketType.isEmpty()
                               ? "market"
-                              : m_tradeConfig->marketType;
+                              : m_tradeConfig->marketType.toLower();
   bool const isMarketType = marketType == "market";
   writer.Key("type");
-  writer.String(marketType.toLower().toStdString().c_str());
+  writer.String(marketType.toStdString().c_str());
 
   writer.Key("side");
   writer.String(m_tradeConfig->side == trade_action_e::buy ? "buy" : "sell");
@@ -116,7 +118,6 @@ void kc_https_plug::createRequestData() {
         writer.Key("size");
         auto const sizeStr =
             QString::number(size, 'f', m_tradeConfig->quantityPrecision);
-        ;
         writer.String(sizeStr.toStdString().c_str());
       } else if (hasSizeDefined && hasBaseAmount) {
         throw std::runtime_error("this should never happen");
@@ -137,7 +138,10 @@ void kc_https_plug::createRequestData() {
     writer.String(QString::number(m_price).toStdString().c_str());
 
     writer.Key("size");
-    writer.String(std::to_string(size).c_str());
+    if (m_isSpot)
+      writer.String(std::to_string(size).c_str());
+    else
+      writer.Int(size);
   }
 
   if (m_isSpot) {
@@ -167,7 +171,7 @@ void kc_https_plug::createRequestData() {
   httpRequest.set(field::content_type, "application/json");
   httpRequest.set(field::user_agent, "postman");
   httpRequest.set(field::accept, "*/*");
-  httpRequest.set(field::connection, "close");
+  httpRequest.set(field::connection, "keep-alive");
   httpRequest.set("KC-API-SIGN", signature);
   httpRequest.set("KC-API-TIMESTAMP", unixEpochTime);
   httpRequest.set("KC-API-KEY", m_apiKey);
@@ -226,10 +230,13 @@ kc_https_plug::~kc_https_plug() {}
 void kc_https_plug::onDataReceived(beast::error_code ec, std::size_t const) {
   if (ec)
     return;
+
   auto &body = m_httpResponse->body();
   size_t const bodyLength = body.length();
+
   rapidjson::Document doc;
   doc.Parse(body.c_str(), bodyLength);
+
   if (!doc.IsObject())
     goto onErrorEnd;
 
@@ -240,22 +247,85 @@ void kc_https_plug::onDataReceived(beast::error_code ec, std::size_t const) {
   try {
     auto const jsonRoot = doc.GetObject();
     auto const codeIter = jsonRoot.FindMember("code");
-    auto const dataIter = jsonRoot.FindMember("data");
-    if (codeIter == jsonRoot.MemberEnd() || dataIter == jsonRoot.MemberEnd() ||
-        strcmp(codeIter->value.GetString(), "200000") != 0)
+    if (codeIter == jsonRoot.MemberEnd())
       goto onErrorEnd;
-    auto const dataObject = dataIter->value.GetObject();
-    auto const orderIter = dataObject.FindMember("orderId");
-    if (orderIter == dataObject.MemberEnd())
+
+    auto const statusCode = codeIter->value.GetString();
+
+    if (strcmp(statusCode, "429000") == 0) {
+      if (m_process == process_e::market_initiated)
+        m_process = process_e::monitoring_failed_market;
+      return startMonitoringLastOrder();
+    } else if (strcmp(statusCode, "100001") == 0) {
+      qDebug() << body.c_str();
+      m_process = process_e::limit_initiated;
+      return initiateLimitOrder();
+    } else if (strcmp(statusCode, "200000") != 0) {
       goto onErrorEnd;
-    m_kucoinOrderID = orderIter->value.GetString();
-    startMonitoringNewOrder();
+    }
+
+    bool const successfulMarket = m_process == process_e::market_initiated ||
+        m_process == process_e::monitoring_successful_request;
+
+    if (successfulMarket) {
+      auto const dataIter = jsonRoot.FindMember("data");
+      if (dataIter == jsonRoot.MemberEnd())
+        goto onErrorEnd;
+
+      auto const& dataObject = dataIter->value.GetObject();
+      if (m_process == process_e::market_initiated) {
+        m_process = process_e::monitoring_successful_request;
+
+        auto const orderIter = dataObject.FindMember("orderId");
+        if (orderIter == dataObject.MemberEnd())
+          goto onErrorEnd;
+        m_kucoinOrderID = orderIter->value.GetString();
+        return startMonitoringLastOrder();
+      } else if (m_process == process_e::monitoring_successful_request) {
+        auto const clientOidIter = dataObject.FindMember("clientOid");
+        if (clientOidIter == dataObject.MemberEnd()) {
+          Q_ASSERT(false);
+          qDebug() << body.c_str();
+          goto noErrorEnd;
+        }
+        auto const clientOid = clientOidIter->value.GetString();
+        Q_ASSERT(strcmp(clientOid, m_userOrderID.c_str()) == 0);
+        auto const statusIter = dataObject.FindMember("status");
+        if (statusIter == dataObject.MemberEnd()) {
+          qDebug() << body.c_str();
+          goto noErrorEnd;
+        }
+        auto const status = statusIter->value.GetString();
+        if (strcmp(status, "open") == 0) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(500));
+          return startMonitoringLastOrder();
+        } else if (strcmp(status, "done") == 0) {
+          auto const sizeIter = dataObject.FindMember("size");
+          if (sizeIter != dataObject.MemberEnd())
+            m_finalSizePurchased = sizeIter->value.GetInt();
+          auto const quantityIter = dataObject.FindMember("value");
+          if (quantityIter != dataObject.MemberEnd())
+            m_finalQuantityPurchased =
+                std::stod(quantityIter->value.GetString());
+        }
+        qDebug() << "NewStatus" << status;
+        goto noErrorEnd;
+      } else if (dataObject.HasMember("orderId")) {
+        m_process = process_e::monitoring_successful_request;
+        auto const orderIter = dataObject.FindMember("orderId");
+        if (orderIter == dataObject.MemberEnd())
+          goto onErrorEnd;
+        m_kucoinOrderID = orderIter->value.GetString();
+        return startMonitoringLastOrder();
+      }
+    }
   } catch (...) {
     goto onErrorEnd;
   }
 
 onErrorEnd:
   qDebug() << "There must have been an error" << body.c_str();
+  m_errorString = body.c_str();
   goto noErrorEnd;
 
 noErrorEnd:
@@ -263,8 +333,32 @@ noErrorEnd:
       [](boost::system::error_code const) { qDebug() << "Stream closed"; });
 }
 
-void kc_https_plug::startMonitoringNewOrder() {
+void kc_https_plug::startMonitoringLastOrder() {
   createMonitoringRequest();
+  sendHttpsData();
+}
+
+void kc_https_plug::initiateLimitOrder() {
+  /* if (m_triedLimit){
+    // nothing to do anymore
+    qDebug() << "Giving up again after encountering an error"
+             << m_httpResponse->body().c_str();
+    m_tcpStream.async_shutdown(
+        [](boost::system::error_code const) { qDebug() << "Stream closed"; });
+    return;
+  } */
+
+  auto const marketType = m_tradeConfig->marketType;
+  m_tradeConfig->marketType = "limit";
+  createRequestData();
+
+  {
+#ifndef TESTNET
+    qDebug() << m_httpRequest->target().data();
+#endif
+  }
+  // restore to previous settings
+  m_tradeConfig->marketType = marketType;
   sendHttpsData();
 }
 
@@ -274,27 +368,37 @@ void kc_https_plug::createMonitoringRequest() {
   auto const host = m_isSpot ? constants::kucoin_https_spot_host
                              : constants::kc_futures_api_host;
 
-  std::string const path =
-      m_isSpot ? "/api/v1/orders/" : "/api/v2/order/detail";
-  auto const queryString = m_isSpot
-                               ? m_kucoinOrderID.toStdString()
-                               : "orderId=" + m_kucoinOrderID.toStdString() +
-                                     "&clientOid=" + m_userOrderID;
+  std::string path = "/api/v1/orders/";
+  if (m_isSpot) {
+    if (!m_kucoinOrderID.isEmpty())
+      path += m_kucoinOrderID.toStdString();
+  } else {
+    if (!m_kucoinOrderID.isEmpty())
+      path += m_kucoinOrderID.toStdString();
+    else
+      path += "byClientOid?clientOid=" + m_userOrderID;
+  }
+
+  // Cause a small delay before grabbing the timer, the delay is needed so
+  // kucoin does not return a 429 again when we check the status of the last
+  // order
+
+  qDebug() << path.c_str();
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
   auto const unixEpochTime = std::to_string(std::time(nullptr) * 1'000);
   auto const signatureStr =
       base64_encode(hmac256_encode(unixEpochTime + "GET" + path, m_apiSecret));
-  auto const target = path + (m_isSpot ? "?" : "") + queryString;
 
   auto &httpRequest = m_httpRequest.emplace();
-
   httpRequest.method(http::verb::get);
   httpRequest.version(11);
-  httpRequest.target(target);
+  httpRequest.target(path);
   httpRequest.set(field::host, host);
   httpRequest.set(field::content_type, "application/json");
   httpRequest.set(field::user_agent, "postman");
   httpRequest.set(field::accept, "*/*");
-  httpRequest.set(field::connection, "close");
+  httpRequest.set(field::connection, "keep-alive");
   httpRequest.set("KC-API-SIGN", signatureStr);
   httpRequest.set("KC-API-TIMESTAMP", unixEpochTime);
   httpRequest.set("KC-API-KEY", m_apiKey);
