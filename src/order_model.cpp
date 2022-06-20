@@ -49,6 +49,13 @@ int order_model::columnCount(const QModelIndex &parent) const {
   return 10;
 }
 
+void order_model::refreshModel() {
+  QModelIndex const startModel = index(0, 0);
+  QModelIndex const endModel = index((int)m_modelData.size() - 1,
+                                     (int)columnCount() - 1);
+  emit QAbstractTableModel::dataChanged(startModel, endModel);
+}
+
 QVariant order_model::data(const QModelIndex &index, int role) const {
   if (!index.isValid())
     return QVariant();

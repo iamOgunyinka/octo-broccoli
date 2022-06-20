@@ -22,10 +22,11 @@ struct api_data_t {
 
 struct trade_config_data_t {
   QString symbol;
-  QString marketType;
   double baseAmount = 0.0;
   double size = 0.0;
   double leverage = 0.0;
+  double multiplier = 0.0; // only for KuCoin
+  double tickSize = 0.0; // only for KuCoin
   int8_t pricePrecision = -1;
   int8_t quantityPrecision = pricePrecision;
   int8_t baseAssetPrecision = pricePrecision;
@@ -33,6 +34,7 @@ struct trade_config_data_t {
   trade_action_e side = trade_action_e::nothing;
   trade_type_e tradeType = trade_type_e::unknown;
   exchange_name_e exchange = exchange_name_e::none;
+  market_type_e marketType = market_type_e::unknown;
 };
 
 struct internal_address_t {

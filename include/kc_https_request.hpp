@@ -18,18 +18,20 @@ namespace korrelator {
 
 using tcp = boost::asio::ip::tcp;
 
-enum class process_e {
-  market_initiated, // first step ever
-  monitoring_failed_market,
-  monitoring_successful_request,
-  market_404,
-  limit_initiated,
-};
 
 class kc_https_plug {
+  enum class process_e {
+    market_initiated, // first step ever
+    monitoring_failed_market,
+    monitoring_successful_request,
+    market_404,
+    limit_initiated,
+  };
+
   bool m_isSpot;
   trade_action_e const m_tradeAction;
   process_e m_process;
+  int m_numberOfRetries = 0;
   double m_price = 0.0;
 
   double m_finalQuantityPurchased = 0.0;

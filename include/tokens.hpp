@@ -35,8 +35,8 @@ public:
   double alpha = 1.0;
   double normalizedPrice = 0.0;
   double realPrice = 0.0;
-  // double marketFeeRate = 0.0;
-  // double takerFeeRate = 0.0;
+  double multiplier = 0.0; // for kucoin only
+  double tickSize = 0.0; // for kucoin only
 
   qint64 graphPointsDrawnCount = 0;
   QCPGraph *graph = nullptr;

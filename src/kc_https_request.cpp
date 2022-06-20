@@ -13,6 +13,8 @@
 #include "constants.hpp"
 #include "crypto.hpp"
 
+extern double maxOrderRetries;
+
 namespace korrelator {
 
 void kc_https_plug::sendHttpsData() {
@@ -87,10 +89,8 @@ void kc_https_plug::createRequestData() {
   writer.Key("symbol");
   writer.String(m_tradeConfig->symbol.toUpper().toStdString().c_str());
 
-  auto const marketType = m_tradeConfig->marketType.isEmpty()
-                              ? "market"
-                              : m_tradeConfig->marketType.toLower();
-  bool const isMarketType = marketType == "market";
+  auto const marketType = korrelator::marketTypeToString(m_tradeConfig->marketType);
+  bool const isMarketType = m_tradeConfig->marketType == market_type_e::market;
   writer.Key("type");
   writer.String(marketType.toStdString().c_str());
 
@@ -129,10 +129,7 @@ void kc_https_plug::createRequestData() {
       writer.Double(size);
     }
   } else {
-    if (!hasSizeDefined && hasBaseAmount)
-      size = baseAmount / m_price;
-    size = format_quantity(size, m_tradeConfig->quantityPrecision);
-    m_price = format_quantity(m_price, m_tradeConfig->pricePrecision);
+    m_price = format_quantity(m_price, 6);
 
     writer.Key("price");
     writer.String(QString::number(m_price).toStdString().c_str());
@@ -141,7 +138,7 @@ void kc_https_plug::createRequestData() {
     if (m_isSpot)
       writer.String(std::to_string(size).c_str());
     else
-      writer.Int(size);
+      writer.Int(baseAmount);
   }
 
   if (m_isSpot) {
@@ -265,7 +262,8 @@ void kc_https_plug::onDataReceived(beast::error_code ec, std::size_t const) {
     }
 
     bool const successfulMarket = m_process == process_e::market_initiated ||
-        m_process == process_e::monitoring_successful_request;
+        m_process == process_e::monitoring_successful_request ||
+        m_process == process_e::limit_initiated;
 
     if (successfulMarket) {
       auto const dataIter = jsonRoot.FindMember("data");
@@ -273,7 +271,8 @@ void kc_https_plug::onDataReceived(beast::error_code ec, std::size_t const) {
         goto onErrorEnd;
 
       auto const& dataObject = dataIter->value.GetObject();
-      if (m_process == process_e::market_initiated) {
+      if (m_process == process_e::market_initiated ||
+          m_process == process_e::limit_initiated) {
         m_process = process_e::monitoring_successful_request;
 
         auto const orderIter = dataObject.FindMember("orderId");
@@ -284,8 +283,8 @@ void kc_https_plug::onDataReceived(beast::error_code ec, std::size_t const) {
       } else if (m_process == process_e::monitoring_successful_request) {
         auto const clientOidIter = dataObject.FindMember("clientOid");
         if (clientOidIter == dataObject.MemberEnd()) {
-          Q_ASSERT(false);
           qDebug() << body.c_str();
+          Q_ASSERT(false);
           goto noErrorEnd;
         }
         auto const clientOid = clientOidIter->value.GetString();
@@ -300,15 +299,15 @@ void kc_https_plug::onDataReceived(beast::error_code ec, std::size_t const) {
           std::this_thread::sleep_for(std::chrono::milliseconds(500));
           return startMonitoringLastOrder();
         } else if (strcmp(status, "done") == 0) {
-          auto const sizeIter = dataObject.FindMember("size");
+          qDebug() << body.c_str();
+          auto const sizeIter = dataObject.FindMember("filledSize");
           if (sizeIter != dataObject.MemberEnd())
             m_finalSizePurchased = sizeIter->value.GetInt();
-          auto const quantityIter = dataObject.FindMember("value");
+          auto const quantityIter = dataObject.FindMember("filledValue");
           if (quantityIter != dataObject.MemberEnd())
             m_finalQuantityPurchased =
                 std::stod(quantityIter->value.GetString());
         }
-        qDebug() << "NewStatus" << status;
         goto noErrorEnd;
       } else if (dataObject.HasMember("orderId")) {
         m_process = process_e::monitoring_successful_request;
@@ -329,8 +328,7 @@ onErrorEnd:
   goto noErrorEnd;
 
 noErrorEnd:
-  m_tcpStream.async_shutdown(
-      [](boost::system::error_code const) { qDebug() << "Stream closed"; });
+  m_tcpStream.async_shutdown([](boost::system::error_code const){});
 }
 
 void kc_https_plug::startMonitoringLastOrder() {
@@ -339,26 +337,18 @@ void kc_https_plug::startMonitoringLastOrder() {
 }
 
 void kc_https_plug::initiateLimitOrder() {
-  /* if (m_triedLimit){
-    // nothing to do anymore
-    qDebug() << "Giving up again after encountering an error"
-             << m_httpResponse->body().c_str();
-    m_tcpStream.async_shutdown(
-        [](boost::system::error_code const) { qDebug() << "Stream closed"; });
+  if (++m_numberOfRetries > (int)maxOrderRetries) {
+    m_errorString = "Maximum number of retries";
     return;
-  } */
-
-  auto const marketType = m_tradeConfig->marketType;
-  m_tradeConfig->marketType = "limit";
-  createRequestData();
-
-  {
-#ifndef TESTNET
-    qDebug() << m_httpRequest->target().data();
-#endif
   }
-  // restore to previous settings
-  m_tradeConfig->marketType = marketType;
+  createRequestData();
+#ifdef _DEBUG
+  {
+    std::stringstream ss;
+    ss << *m_httpRequest;
+    qDebug() << ss.str().c_str();
+  }
+#endif
   sendHttpsData();
 }
 
@@ -382,8 +372,6 @@ void kc_https_plug::createMonitoringRequest() {
   // Cause a small delay before grabbing the timer, the delay is needed so
   // kucoin does not return a 429 again when we check the status of the last
   // order
-
-  qDebug() << path.c_str();
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
   auto const unixEpochTime = std::to_string(std::time(nullptr) * 1'000);

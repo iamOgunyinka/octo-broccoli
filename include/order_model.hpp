@@ -37,11 +37,13 @@ public:
   bool insertRows(int row, int count,
                   const QModelIndex &parent = QModelIndex()) override;
   void AddData(model_data_t &&);
+  void refreshModel ();
   model_data_t* front() {
     if (m_modelData.empty())
       return nullptr;
     return &m_modelData.front();
   }
+
 private:
   std::deque<model_data_t> m_modelData;
 };

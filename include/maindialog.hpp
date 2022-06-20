@@ -71,6 +71,11 @@ public:
   MainDialog(QWidget *parent = nullptr);
   ~MainDialog();
 
+  void refreshModel(){
+    if (m_model)
+      m_model->refreshModel();
+  }
+
 private:
   void onSettingsDialogClicked();
   void registerCustomTypes();
@@ -88,7 +93,7 @@ private:
   void stopGraphPlotting();
   void saveTokensToFile();
   void readTokensFromFile();
-  void readOrdersConfigFromFile();
+  void readTradesConfigFromFile();
   void addNewItemToTokenMap(QString const &name, trade_type_e const,
                             exchange_name_e const);
   void enableUIComponents(bool const);
@@ -128,9 +133,7 @@ private:
   void sendExchangeRequest(korrelator::model_data_t const &,
                            exchange_name_e const, trade_type_e const tradeType,
                            korrelator::cross_over_data_t const &);
-  static void tradeBinanceToken(
-      MainDialog*, std::unique_ptr<korrelator::order_model>&);
-  static void tradeKuCoinToken(
+  static void tradeExchangeTokens(
       MainDialog*, std::unique_ptr<korrelator::order_model>&);
 
 private:
