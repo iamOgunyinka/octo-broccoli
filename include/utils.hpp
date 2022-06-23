@@ -24,9 +24,9 @@ struct trade_config_data_t {
   QString symbol;
   double baseAmount = 0.0;
   double size = 0.0;
-  double leverage = 0.0;
   double multiplier = 0.0; // only for KuCoin
   double tickSize = 0.0; // only for KuCoin
+  int leverage = 0;
   int8_t pricePrecision = -1;
   int8_t quantityPrecision = pricePrecision;
   int8_t baseAssetPrecision = pricePrecision;

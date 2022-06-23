@@ -93,6 +93,7 @@ private:
   void stopGraphPlotting();
   void saveTokensToFile();
   void readTokensFromFile();
+  void updateKuCoinTradeConfiguration();
   void readTradesConfigFromFile();
   void addNewItemToTokenMap(QString const &name, trade_type_e const,
                             exchange_name_e const);
@@ -130,7 +131,7 @@ private:
                                                     double const keyEnd,
                                                     bool const updateGraph);
 
-  void sendExchangeRequest(korrelator::model_data_t const &,
+  void sendExchangeRequest(korrelator::model_data_t&,
                            exchange_name_e const, trade_type_e const tradeType,
                            korrelator::cross_over_data_t const &);
   static void tradeExchangeTokens(

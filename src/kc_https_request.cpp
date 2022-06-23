@@ -6,12 +6,12 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/write.hpp>
 
+#include "constants.hpp"
+#include "crypto.hpp"
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include <thread>
-#include "constants.hpp"
-#include "crypto.hpp"
 
 extern double maxOrderRetries;
 
@@ -89,7 +89,8 @@ void kc_https_plug::createRequestData() {
   writer.Key("symbol");
   writer.String(m_tradeConfig->symbol.toUpper().toStdString().c_str());
 
-  auto const marketType = korrelator::marketTypeToString(m_tradeConfig->marketType);
+  auto const marketType =
+      korrelator::marketTypeToString(m_tradeConfig->marketType);
   bool const isMarketType = m_tradeConfig->marketType == market_type_e::market;
   writer.Key("type");
   writer.String(marketType.toStdString().c_str());
@@ -261,7 +262,8 @@ void kc_https_plug::onDataReceived(beast::error_code ec, std::size_t const) {
       goto onErrorEnd;
     }
 
-    bool const successfulMarket = m_process == process_e::market_initiated ||
+    bool const successfulMarket =
+        m_process == process_e::market_initiated ||
         m_process == process_e::monitoring_successful_request ||
         m_process == process_e::limit_initiated;
 
@@ -270,7 +272,7 @@ void kc_https_plug::onDataReceived(beast::error_code ec, std::size_t const) {
       if (dataIter == jsonRoot.MemberEnd())
         goto onErrorEnd;
 
-      auto const& dataObject = dataIter->value.GetObject();
+      auto const &dataObject = dataIter->value.GetObject();
       if (m_process == process_e::market_initiated ||
           m_process == process_e::limit_initiated) {
         m_process = process_e::monitoring_successful_request;
@@ -328,7 +330,7 @@ onErrorEnd:
   goto noErrorEnd;
 
 noErrorEnd:
-  m_tcpStream.async_shutdown([](boost::system::error_code const){});
+  m_tcpStream.async_shutdown([](boost::system::error_code const) {});
 }
 
 void kc_https_plug::startMonitoringLastOrder() {

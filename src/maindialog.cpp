@@ -85,7 +85,7 @@ exchange_name_e stringToExchangeName(QString const &name) {
   return exchange_name_e::none;
 }
 
-void updateTokenIter(token_t& value) {
+void updateTokenIter(token_t &value) {
   auto const price = value.realPrice;
   if (value.calculatingNewMinMax) {
     value.minPrice = price * 0.75;
@@ -165,7 +165,7 @@ MainDialog::MainDialog(QWidget *parent)
   }
 
   std::thread{[this] { tradeExchangeTokens(this, m_model); }}.detach();
-  QTimer::singleShot(std::chrono::milliseconds(500), this, [this]{
+  QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
     getSpotsTokens(exchange_name_e::kucoin);
     getFuturesTokens(exchange_name_e::kucoin);
   });
@@ -306,8 +306,8 @@ void MainDialog::connectAllUISignals() {
   QObject::connect(ui->openConfigFolderButton, &QPushButton::clicked, this, [] {
     QProcess process;
     process.setWorkingDirectory(".");
-    process.startDetached("explorer", QStringList() <<
-                  korrelator::constants::root_dir);
+    process.startDetached("explorer", QStringList()
+                                          << korrelator::constants::root_dir);
   });
   QObject::connect(this, &MainDialog::newOrderDetected, this,
                    [this](auto a, auto b, exchange_name_e const exchange,
@@ -365,8 +365,7 @@ void MainDialog::connectAllUISignals() {
     addNewItemToTokenMap(tokenName, trade_type_e::futures, exchange);
     saveTokensToFile();
   });
-  QObject::connect(ui->applyUmbralButton, &QPushButton::clicked, this, [this]
-  {
+  QObject::connect(ui->applyUmbralButton, &QPushButton::clicked, this, [this] {
     m_threshold = getIntegralValue(ui->umbralLine);
     if (isnan(m_threshold))
       return;
@@ -447,10 +446,15 @@ void MainDialog::stopGraphPlotting() {
   m_programIsRunning = false;
   enableUIComponents(true);
 
-  for(auto& token: m_tokens)
+  for (auto &token : m_tokens)
     token.reset();
-  for (auto& token: m_refs)
+  for (auto &token : m_refs)
     token.reset();
+  {
+    korrelator::plug_data_t data;
+    data.tradeType = trade_type_e::unknown;
+    token_plugs.append(std::move(data));
+  }
 }
 
 int MainDialog::getTimerTickMilliseconds() const {
@@ -671,9 +675,8 @@ void MainDialog::getFuturesTokens(korrelator::exchange_name_e const exchange,
 void MainDialog::getKuCoinExchangeInfo(trade_type_e const tradeType) {
   if (tradeType == trade_type_e::futures)
     return;
-  auto const fullUrl =
-      https + korrelator::constants::kucoin_https_spot_host +
-      QString("/api/v1/currencies");
+  auto const fullUrl = https + korrelator::constants::kucoin_https_spot_host +
+                       QString("/api/v1/currencies");
   QNetworkRequest request(fullUrl);
   request.setHeader(QNetworkRequest::KnownHeaders::ContentTypeHeader,
                     "application/json");
@@ -898,8 +901,8 @@ void MainDialog::readTradesConfigFromFile() {
 
   m_tradeConfigDataList.clear();
   auto const objectKeys = jsonObject.keys();
-  for (int i = 0; i < objectKeys.size(); ++i ) {
-    auto const & key = objectKeys[i];
+  for (int i = 0; i < objectKeys.size(); ++i) {
+    auto const &key = objectKeys[i];
     auto const exchange = korrelator::stringToExchangeName(key);
     if (exchange == exchange_name_e::none)
       continue;
@@ -962,7 +965,7 @@ void MainDialog::readTradesConfigFromFile() {
       }
 
       if (data.tradeType == trade_type_e::futures)
-        data.leverage = object.value("leverage").toDouble();
+        data.leverage = object.value("leverage").toInt();
       m_tradeConfigDataList.push_back(std::move(data));
     }
   }
@@ -972,7 +975,9 @@ void MainDialog::readTradesConfigFromFile() {
               return std::tuple(a.exchange, a.symbol.toLower()) <
                      std::tuple(b.exchange, b.symbol.toLower());
             });
+
   updateTradeConfigurationPrecisions();
+  updateKuCoinTradeConfiguration();
 }
 
 void MainDialog::addNewItemToTokenMap(
@@ -1164,7 +1169,8 @@ void MainDialog::setupGraphData() {
 }
 
 void MainDialog::getInitialTokenPrices() {
-  static size_t numberOfRecursions = 0;
+  static size_t numberOfRecursions;
+  numberOfRecursions = 0;
 
   auto normalizePrice = [this](auto &list, auto &result, auto const tt) {
     for (auto &value : list) {
@@ -1193,7 +1199,8 @@ void MainDialog::getInitialTokenPrices() {
         m_tokens[0].normalizedPrice = (price / (double)m_refs.size());
       }
       // after successfully getting the SPOTs and FUTURES' prices,
-      // start the websocket and get real-time updates.
+      // update kucoin's trade config && start the websockets.
+      updateKuCoinTradeConfiguration();
       startWebsocket();
     }
   };
@@ -1238,7 +1245,7 @@ double MainDialog::getIntegralValue(QLineEdit *lineEdit) {
   return maxDoubleValue;
 }
 
-bool MainDialog::validateUserInput() {  
+bool MainDialog::validateUserInput() {
   maxOrderRetries = getIntegralValue(ui->maxRetriesLine);
   if (isnan(maxOrderRetries))
     return false;
@@ -1314,28 +1321,31 @@ void MainDialog::calculatePriceNormalization() {
     korrelator::updateTokenIter(token);
 }
 
-void MainDialog::startWebsocket() {
-  // price updater
+void MainDialog::updateKuCoinTradeConfiguration() {
   using korrelator::trade_type_e;
   {
-    auto& kucoinFutures = m_watchables[(int)exchange_name_e::kucoin].futures;
+    auto &kucoinFutures = m_watchables[(int)exchange_name_e::kucoin].futures;
     for (int x = 0; x < m_tradeConfigDataList.size(); ++x) {
-      auto& configuration = m_tradeConfigDataList[x];
+      auto &configuration = m_tradeConfigDataList[x];
       if (configuration.exchange != exchange_name_e::kucoin)
         continue;
-      auto iter = std::find_if(kucoinFutures.cbegin(), kucoinFutures.cend(),
-                               [configuration](korrelator::token_t const &t)
-      {
-        return t.tradeType == trade_type_e::futures &&
-          t.symbolName.compare(configuration.symbol, Qt::CaseInsensitive) == 0;
-      });
+      auto iter =
+          std::find_if(kucoinFutures.cbegin(), kucoinFutures.cend(),
+                       [configuration](korrelator::token_t const &t) {
+                         return t.tradeType == trade_type_e::futures &&
+                                t.symbolName.compare(configuration.symbol,
+                                                     Qt::CaseInsensitive) == 0;
+                       });
       if (iter != kucoinFutures.cend()) {
         configuration.multiplier = iter->multiplier;
         configuration.tickSize = iter->tickSize;
       }
     }
   }
+}
 
+void MainDialog::startWebsocket() {
+  // price updater
   m_priceUpdater.worker = std::make_unique<korrelator::Worker>([this] {
     m_websocket = std::make_unique<korrelator::websocket_manager>();
 
@@ -1646,7 +1656,7 @@ void MainDialog::onSettingsDialogClicked() {
 }
 
 void MainDialog::sendExchangeRequest(
-    korrelator::model_data_t const &modelData, exchange_name_e const exchange,
+    korrelator::model_data_t &modelData, exchange_name_e const exchange,
     trade_type_e const tradeType,
     korrelator::cross_over_data_t const &crossOver) {
   auto iter = m_apiTradeApiMap.find(exchange);
@@ -1670,7 +1680,7 @@ void MainDialog::sendExchangeRequest(
       });
 
   if (configIterPair.first == configIterPair.second) {
-    qDebug() << "Exchange not found";
+    modelData.remark = "Token pair or exchange not found";
     return;
   }
 
@@ -1682,7 +1692,7 @@ void MainDialog::sendExchangeRequest(
   }
 
   if (tradeConfigPtrs.empty()) {
-    qDebug() << "Cannot find tradeType of this account";
+    modelData.remark = "Cannot find tradeType of this account";
     return;
   }
 
@@ -1695,7 +1705,7 @@ void MainDialog::sendExchangeRequest(
   }
 
   if (!tradeConfigPtr) {
-    qDebug() << "There was a problem";
+    modelData.remark = "Trade configuration was not found for this token/side";
     return;
   }
 
@@ -1713,15 +1723,16 @@ void MainDialog::sendExchangeRequest(
 
   if (exchange == exchange_name_e::binance) {
     if (!isFutures && !apiInfo.spotApiKey.isEmpty())
-      token_plugs.append(std::move(data));
+      return token_plugs.append(std::move(data));
     else if (isFutures && !apiInfo.futuresApiKey.isEmpty())
-      token_plugs.append(std::move(data));
+      return token_plugs.append(std::move(data));
   } else if (exchange == exchange_name_e::kucoin) {
     if (!isFutures && !apiInfo.spotApiKey.isEmpty())
-      token_plugs.append(std::move(data));
+      return token_plugs.append(std::move(data));
     else if (isFutures && !apiInfo.futuresApiKey.isEmpty())
-      token_plugs.append(std::move(data));
+      return token_plugs.append(std::move(data));
   }
+  modelData.remark = "Internal program error";
 }
 
 void MainDialog::tradeExchangeTokens(
@@ -1744,6 +1755,16 @@ void MainDialog::tradeExchangeTokens(
 
   while (true) {
     auto data = token_plugs.get();
+
+    // only when program is stopped
+    if (data.tradeType == trade_type_e::unknown) {
+      token_plugs.clear();
+      lastQuantity = NAN;
+      lastAction = trade_action_e::nothing;
+      ioContext.stop();
+      ioContext.restart();
+      continue;
+    }
 
     if (lastAction != trade_action_e::nothing) {
       ioContext.restart();
@@ -1787,8 +1808,8 @@ void MainDialog::tradeExchangeTokens(
       auto const quantityPurchased = kcRequest.quantityPurchased();
       auto const sizePurchased = kcRequest.sizePurchased();
       if (quantityPurchased != 0.0 && sizePurchased != 0.0) {
-        price = (quantityPurchased / sizePurchased) /
-            data.tradeConfig->multiplier;
+        price =
+            (quantityPurchased / sizePurchased) / data.tradeConfig->multiplier;
       }
       errorString = kcRequest.errorString();
       delete connector.kucoinConnector;
@@ -1809,6 +1830,9 @@ void MainDialog::tradeExchangeTokens(
       }
       if (modelData)
         modelData->remark = "Error: " + errorString;
+    } else {
+      if (modelData)
+        modelData->remark = "Success";
     }
 
     mainDialog->refreshModel();

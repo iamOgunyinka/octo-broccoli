@@ -85,17 +85,17 @@ void binance_https_plug::createLeverageRequest() {
   using http::field;
   m_currentRequest = request_type_e::leverage;
 
-  auto& httpRequest = m_httpRequest.emplace();
+  auto &httpRequest = m_httpRequest.emplace();
   auto const host = constants::binance_http_futures_host;
   std::string const path = "/fapi/v1/leverage";
   QString query =
-      "symbol=" + m_tradeConfig->symbol.toUpper() + "&leverage=" +
-      QString::number((int)m_tradeConfig->leverage) +
+      "symbol=" + m_tradeConfig->symbol.toUpper() +
+      "&leverage=" + QString::number(m_tradeConfig->leverage) +
       "&recvWindow=5000&timestamp=" + QString::number(getGMTTimeMs());
-  auto const signature = hmac256_encode(
-        query.toStdString(), m_apiSecret.toStdString(), true);
-  query += QString("&signature=") +
-      reinterpret_cast<char const *>(signature.data());
+  auto const signature =
+      hmac256_encode(query.toStdString(), m_apiSecret.toStdString(), true);
+  query +=
+      QString("&signature=") + reinterpret_cast<char const *>(signature.data());
 
   httpRequest.method(http::verb::post);
   httpRequest.version(11);
@@ -119,18 +119,20 @@ void binance_https_plug::createRequestData() {
   query += "&side=";
   query += (m_tradeConfig->side == trade_action_e::buy ? "BUY" : "SELL");
 
-  auto const marketType = korrelator::marketTypeToString(m_tradeConfig->marketType);
+  auto const marketType =
+      korrelator::marketTypeToString(m_tradeConfig->marketType);
   query += "&type=" + marketType.toUpper();
 
-  double& size = m_tradeConfig->size;
-  double& baseAmount = m_tradeConfig->baseAmount;
+  double &size = m_tradeConfig->size;
+  double &baseAmount = m_tradeConfig->baseAmount;
 
   if (m_tradeConfig->marketType == korrelator::market_type_e::market) {
     if (m_isSpot) {
       if ((size == 0.0 && baseAmount != 0.0)) {
         baseAmount = format_quantity(baseAmount, m_tradeConfig->quotePrecision);
         query += "&quoteOrderQty=";
-        query += QString::number(baseAmount, 'f', m_tradeConfig->quotePrecision);
+        query +=
+            QString::number(baseAmount, 'f', m_tradeConfig->quotePrecision);
       } else if (baseAmount == 0.0 && size != 0.0) {
         size = format_quantity(size, m_tradeConfig->quantityPrecision);
         query += "&quantity=";
@@ -138,7 +140,8 @@ void binance_https_plug::createRequestData() {
       }
     } else { // futures
       if (size == 0.0)
-        size = ((m_tradeConfig->baseAmount / m_price) * m_tradeConfig->leverage);
+        size =
+            ((m_tradeConfig->baseAmount / m_price) * m_tradeConfig->leverage);
       size = format_quantity(size, m_tradeConfig->quantityPrecision);
       query += "&quantity=";
       query += QString::number(size, 'f', m_tradeConfig->quantityPrecision);
@@ -160,18 +163,19 @@ void binance_https_plug::createRequestData() {
     query += QString::number(m_price, 'f', m_tradeConfig->pricePrecision);
   }
 
-  query += QString("&recvWindow=5000&timestamp=") +
-      QString::number(getGMTTimeMs());
+  query +=
+      QString("&recvWindow=5000&timestamp=") + QString::number(getGMTTimeMs());
 
-  auto const signature = hmac256_encode(
-        query.toStdString(), m_apiSecret.toStdString(), true);
-  query += QString("&signature=") +
-      reinterpret_cast<char const *>(signature.data());
+  auto const signature =
+      hmac256_encode(query.toStdString(), m_apiSecret.toStdString(), true);
+  query +=
+      QString("&signature=") + reinterpret_cast<char const *>(signature.data());
+  qDebug() << query;
   auto const host = m_isSpot ? constants::binance_http_spot_host
                              : constants::binance_http_futures_host;
 
   std::string const path = m_isSpot ? "/api/v3/order" : "/fapi/v1/order";
-  auto& httpRequest = m_httpRequest.emplace();
+  auto &httpRequest = m_httpRequest.emplace();
 
   httpRequest.method(http::verb::post);
   httpRequest.version(11);
@@ -237,8 +241,8 @@ void binance_https_plug::onDataReceived(beast::error_code ec,
     return;
   }
 
-  auto& body = m_httpResponse->body();
-  char const * const str = body.c_str();
+  auto &body = m_httpResponse->body();
+  char const *const str = body.c_str();
   size_t const length = body.length();
   if (m_currentRequest == request_type_e::leverage)
     return processLeverageResponse(str, length);
@@ -249,8 +253,8 @@ void binance_https_plug::onDataReceived(beast::error_code ec,
 #undef GetObject
 #endif
 
-void binance_https_plug::processLeverageResponse(
-    char const *str, size_t const length) {
+void binance_https_plug::processLeverageResponse(char const *str,
+                                                 size_t const length) {
   rapidjson::Document doc;
   doc.Parse(str, length);
   if (!doc.IsObject())
@@ -262,14 +266,14 @@ void binance_https_plug::processLeverageResponse(
     if (leverageIter == jsonRoot.MemberEnd())
       return createErrorResponse();
     auto const leverage = leverageIter->value.GetInt();
-    if (leverage != (int)m_tradeConfig->leverage)
+    if (leverage != m_tradeConfig->leverage)
       return createErrorResponse();
     m_currentRequest = request_type_e::market;
 
     qDebug() << str;
     createRequestData();
     return sendHttpsData();
-  } catch(std::exception const & e) {
+  } catch (std::exception const &e) {
     qDebug() << e.what();
     return createErrorResponse();
   } catch (...) {
@@ -277,8 +281,8 @@ void binance_https_plug::processLeverageResponse(
   }
 }
 
-void binance_https_plug::processOrderResponse(
-    char const *str, size_t const length) {
+void binance_https_plug::processOrderResponse(char const *str,
+                                              size_t const length) {
   rapidjson::Document doc;
   doc.Parse(str, length);
   if (!doc.IsObject())
@@ -296,17 +300,17 @@ void binance_https_plug::processOrderResponse(
 
     if (status.compare("new", Qt::CaseInsensitive) == 0) {
       auto const binanceOrderIDIter = jsonRoot.FindMember("orderId");
-      if (binanceOrderIDIter != jsonRoot.MemberEnd() && (
-          binanceOrderIDIter->value.IsInt() || binanceOrderIDIter->value.IsInt64())) {
+      if (binanceOrderIDIter != jsonRoot.MemberEnd() &&
+          (binanceOrderIDIter->value.IsInt() ||
+           binanceOrderIDIter->value.IsInt64())) {
         if (binanceOrderIDIter->value.IsInt64())
           m_binanceOrderID = binanceOrderIDIter->value.GetInt64();
         else if (binanceOrderIDIter->value.IsInt())
-          m_binanceOrderID = (int64_t) binanceOrderIDIter->value.GetInt();
+          m_binanceOrderID = (int64_t)binanceOrderIDIter->value.GetInt();
       }
 
       return startMonitoringNewOrder();
-    }
-    else if (status.compare("filled", Qt::CaseInsensitive) == 0) {
+    } else if (status.compare("filled", Qt::CaseInsensitive) == 0) {
       auto const avgPriceIter = jsonRoot.FindMember("avgPrice");
       auto const executedQtyIter = jsonRoot.FindMember("executedQty");
       if (avgPriceIter != jsonRoot.MemberEnd() &&
@@ -322,7 +326,7 @@ void binance_https_plug::processOrderResponse(
       return disconnectConnection();
     }
     return startMonitoringNewOrder();
-  } catch(std::exception const & e){
+  } catch (std::exception const &e) {
     qDebug() << e.what();
     return createErrorResponse();
   } catch (...) {
@@ -337,14 +341,13 @@ void binance_https_plug::createErrorResponse() {
 }
 
 void binance_https_plug::disconnectConnection() {
-  m_tcpStream.async_shutdown([](boost::system::error_code const) {
-    qDebug() << "Stream closed";
-  });
+  m_tcpStream.async_shutdown(
+      [](boost::system::error_code const) { qDebug() << "Stream closed"; });
 }
 
 void binance_https_plug::startMonitoringNewOrder() {
   // allow for enough time before querying the exchange
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));
   createMonitoringRequest();
   sendHttpsData();
 }
@@ -361,10 +364,10 @@ void binance_https_plug::createMonitoringRequest() {
     urlQuery += "&origClientOrderId=" + m_userOrderID;
 
   urlQuery += "&timestamp=" + QString::number(getGMTTimeMs());
-  auto const signature = hmac256_encode(
-        urlQuery.toStdString(), m_apiSecret.toStdString(), true);
-  urlQuery += QString("&signature=") +
-      reinterpret_cast<char const *>(signature.data());
+  auto const signature =
+      hmac256_encode(urlQuery.toStdString(), m_apiSecret.toStdString(), true);
+  urlQuery +=
+      QString("&signature=") + reinterpret_cast<char const *>(signature.data());
 
   std::string const path = m_isSpot ? "/api/v3/order" : "/fapi/v1/order";
 
