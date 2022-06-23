@@ -4,6 +4,7 @@
 #include <mutex>
 
 namespace korrelator {
+
 template <typename T, typename Container = std::deque<T>>
 struct waitable_container_t {
 private:
@@ -22,6 +23,11 @@ public:
   waitable_container_t &operator=(waitable_container_t &&) = delete;
   waitable_container_t(waitable_container_t const &) = delete;
   waitable_container_t &operator=(waitable_container_t const &) = delete;
+
+  void clear() {
+    std::lock_guard<std::mutex> lock_{mutex_};
+    container_.clear();
+  }
 
   T get() {
     std::unique_lock<std::mutex> u_lock{mutex_};

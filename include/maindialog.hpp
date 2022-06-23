@@ -9,9 +9,9 @@
 #include <optional>
 
 #include "order_model.hpp"
+#include "settingsdialog.hpp"
 #include "sthread.hpp"
 #include "tokens.hpp"
-#include "settingsdialog.hpp"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -63,17 +63,24 @@ class MainDialog : public QDialog {
   using list_iterator = korrelator::token_list_t::iterator;
 
 signals:
-  void newOrderDetected(korrelator::cross_over_data_t,
-                        korrelator::model_data_t,
-                        exchange_name_e const, trade_type_e const);
+  void newOrderDetected(korrelator::cross_over_data_t, korrelator::model_data_t,
+                        korrelator::exchange_name_e const,
+                        korrelator::trade_type_e const);
 
 public:
   MainDialog(QWidget *parent = nullptr);
   ~MainDialog();
 
+  void refreshModel(){
+    if (m_model)
+      m_model->refreshModel();
+  }
+
 private:
   void onSettingsDialogClicked();
   void registerCustomTypes();
+  void getExchangeInfo(exchange_name_e const, trade_type_e const);
+  void getKuCoinExchangeInfo(trade_type_e const);
   void getSpotsTokens(exchange_name_e const, callback_t = nullptr);
   void getFuturesTokens(exchange_name_e const, callback_t = nullptr);
   void sendNetworkRequest(QUrl const &url, callback_t, trade_type_e const,
@@ -86,6 +93,8 @@ private:
   void stopGraphPlotting();
   void saveTokensToFile();
   void readTokensFromFile();
+  void updateKuCoinTradeConfiguration();
+  void readTradesConfigFromFile();
   void addNewItemToTokenMap(QString const &name, trade_type_e const,
                             exchange_name_e const);
   void enableUIComponents(bool const);
@@ -104,9 +113,11 @@ private:
   double getMaxPlotsInVisibleRegion() const;
   void updateGraphData(double const key, bool const);
   void setupOrderTableModel();
+  void updateTradeConfigurationPrecisions();
   void onNewOrderDetected(korrelator::cross_over_data_t,
                           korrelator::model_data_t,
-                          exchange_name_e const, trade_type_e const);
+                          exchange_name_e const,
+                          trade_type_e const);
   void calculatePriceNormalization();
   Qt::Alignment getLegendAlignment() const;
   list_iterator find(korrelator::token_list_t &container, QString const &,
@@ -120,16 +131,12 @@ private:
                                                     double const keyEnd,
                                                     bool const updateGraph);
 
-  void sendExchangeRequest(exchange_name_e const, trade_type_e const tradeType,
+  void sendExchangeRequest(korrelator::model_data_t&,
+                           exchange_name_e const, trade_type_e const tradeType,
                            korrelator::cross_over_data_t const &);
-  void tradeBinanceSpot(korrelator::cross_over_data_t const &,
-                        korrelator::api_data_t const &);
-  void tradeKuCoinSpot(korrelator::cross_over_data_t const &,
-                       korrelator::api_data_t const &);
-  void tradeBinanceFutures(korrelator::cross_over_data_t const &,
-                           korrelator::api_data_t const &);
-  void tradeKuCoinFutures(korrelator::cross_over_data_t const &,
-                          korrelator::api_data_t const &);
+  static void tradeExchangeTokens(
+      MainDialog*, std::unique_ptr<korrelator::order_model>&);
+
 private:
   Ui::MainDialog *ui;
 
@@ -141,10 +148,7 @@ private:
   SettingsDialog::api_data_map_t m_apiTradeApiMap;
   korrelator::token_list_t m_tokens;
   korrelator::token_list_t m_refs;
-
-  korrelator::token_list_t::iterator m_refIterator;
-  std::mutex m_mutex;
-
+  std::vector<korrelator::trade_config_data_t> m_tradeConfigDataList;
   korrelator::graph_updater_t m_graphUpdater;
   korrelator::price_updater_t m_priceUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;

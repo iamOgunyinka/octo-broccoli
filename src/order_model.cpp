@@ -26,6 +26,10 @@ QVariant order_model::headerData(int section, Qt::Orientation orientation,
       return "Open date/time";
     case 7:
       return "Side";
+    case 8:
+      return "Exchange price";
+    case 9:
+      return "Remarks";
     default:
       return QVariant{};
     }
@@ -42,7 +46,14 @@ int order_model::rowCount(const QModelIndex &parent) const {
 int order_model::columnCount(const QModelIndex &parent) const {
   if (parent.isValid())
     return 0;
-  return 8;
+  return 10;
+}
+
+void order_model::refreshModel() {
+  QModelIndex const startModel = index(0, 0);
+  QModelIndex const endModel = index((int)m_modelData.size() - 1,
+                                     (int)columnCount() - 1);
+  emit QAbstractTableModel::dataChanged(startModel, endModel);
 }
 
 QVariant order_model::data(const QModelIndex &index, int role) const {
@@ -68,6 +79,10 @@ QVariant order_model::data(const QModelIndex &index, int role) const {
       return d.openTime;
     case 7:
       return d.side;
+    case 8:
+      return d.exchangePrice;
+    case 9:
+      return d.remark;
     default:
       return QVariant{};
     }

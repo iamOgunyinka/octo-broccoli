@@ -1,6 +1,7 @@
 #include "settingsdialog.hpp"
 #include "ui_settingsdialog.h"
 
+#include <QDir>
 #include <QFile>
 #include <QMessageBox>
 #include <QInputDialog>
@@ -8,25 +9,27 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include "constants.hpp"
 #include "sodium.h"
 
-static char const * const encrypted_config_filename = ".config.dat";
-static char const * const config_json_filename = "config.json";
-
-SettingsDialog::SettingsDialog(QWidget *parent) :
-  QDialog(parent),
-  ui(new Ui::SettingsDialog)
+SettingsDialog::SettingsDialog(QWidget *parent)
+  : QDialog(parent)
+  , ui(new Ui::SettingsDialog)
 {
   ui->setupUi(this);
+  ui->encryptCheckbox->setChecked(false);
 
-  readConfigurationFile();
-  QObject::connect(
-        ui->exchangeCombo, &QComboBox::currentTextChanged,
-        this, [this](QString const & exchangeName)
+  Q_ASSERT(QDir().mkpath("config"));
+
+  QObject::connect(ui->exchangeCombo, &QComboBox::currentTextChanged,
+                   this, [this](QString const & exchangeName)
   {
-    if (m_apiInfo.isEmpty())
+    if (m_apiInfo.isEmpty() || exchangeName.isEmpty())
       return;
     auto const exchange = korrelator::stringToExchangeName(exchangeName);
+    if (exchange == korrelator::exchange_name_e::none)
+      return;
+
     auto valueIter = m_apiInfo.find(exchange);
     if (valueIter == m_apiInfo.end())
       return;
@@ -62,6 +65,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) :
       return writeEncryptedFile(payload);
     writeUnencryptedFile(payload);
   });
+  readConfigurationFile();
+  ui->spotPassphraseLine->setFocus();
 }
 
 SettingsDialog::~SettingsDialog()
@@ -86,6 +91,12 @@ void SettingsDialog::processJsonList(QJsonArray& list) {
     data.futuresApiKey = object.value("futures_api_key").toString();
     data.futuresApiSecret = object.value("futures_api_secret").toString();
     data.futuresApiPassphrase = object.value("futures_api_passphrase").toString();
+
+    if (data.futuresApiKey.isEmpty() && !data.spotApiKey.isEmpty())
+      data.futuresApiKey = data.spotApiKey;
+
+    if (data.futuresApiSecret.isEmpty() && !data.spotApiSecret.isEmpty())
+      data.futuresApiSecret = data.spotApiSecret;
 
     m_apiInfo[exchange] = data;
   }
@@ -146,8 +157,7 @@ void SettingsDialog::writeEncryptedFile(QByteArray const & payload) {
   unsigned char const * encryptionKey = reinterpret_cast<unsigned char const *>(
         m_key.data());
   unsigned char nonce[crypto_aead_xchacha20poly1305_ietf_NPUBBYTES]{};
-  for (int i = 0; i < crypto_aead_xchacha20poly1305_ietf_NPUBBYTES; ++i)
-    nonce[i] = 'a' + i;
+  randombytes_buf(nonce, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
 
   std::string t(2048, '0');
   unsigned long long messageSize = t.size();
@@ -161,11 +171,13 @@ void SettingsDialog::writeEncryptedFile(QByteArray const & payload) {
     return;
   }
 
-  QFile file{encrypted_config_filename};
+  using korrelator::constants;
+
+  QFile file{constants::encrypted_config_filename};
   if (file.exists())
     file.remove();
 
-  if (QFile f(config_json_filename); f.exists())
+  if (QFile f(constants::config_json_filename); f.exists())
     f.remove();
 
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -173,16 +185,19 @@ void SettingsDialog::writeEncryptedFile(QByteArray const & payload) {
     return;
   }
 
+  t.resize(messageSize);
   file.write(t.data(), messageSize);
+  file.close();
   QMessageBox::information(this, "Saved", "Changes saved successfully");
 }
 
 void SettingsDialog::writeUnencryptedFile(QByteArray const & payload) {
-  QFile file{config_json_filename};
+  using korrelator::constants;
+  QFile file{constants::config_json_filename};
   if (file.exists())
     file.remove();
 
-  if (QFile f(encrypted_config_filename); f.exists())
+  if (QFile f(constants::encrypted_config_filename); f.exists())
     f.remove();
 
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -194,25 +209,94 @@ void SettingsDialog::writeUnencryptedFile(QByteArray const & payload) {
 }
 
 void SettingsDialog::readConfigurationFile() {
+  using korrelator::constants;
   {
     // priorities on unencrypted file, read this first
-    QFile unencyrptedFile(config_json_filename);
+    QFile unencyrptedFile(constants::config_json_filename);
     if (unencyrptedFile.exists() && unencyrptedFile.open(QIODevice::ReadOnly))
-      return readUnencryptedJsonFile(unencyrptedFile);
+      return readUnencryptedData(unencyrptedFile.readAll());
   }
 
-  QFile encryptedFile(encrypted_config_filename);
+  QFile encryptedFile(constants::encrypted_config_filename);
   if (!encryptedFile.exists() || !encryptedFile.open(QIODevice::ReadOnly))
     return;
   return readEncryptedFile(encryptedFile);
 }
 
-void SettingsDialog::readUnencryptedJsonFile(QFile& file) {
+void SettingsDialog::readEncryptedFile(QFile& file) {
+  if (m_key.empty()) {
+    auto const decryptionKey = QInputDialog::getText(
+          this, "Decryption key", "Please input the decryption key",
+          QLineEdit::Password).toStdString();
+    if (decryptionKey.empty())
+      return;
+    m_key = decryptionKey;
+  }
 
+  std::string fileDecrypted(4'096, '0');
+  unsigned long long fileDecryptedLength;
+  unsigned char *mFileDecrypted = reinterpret_cast<unsigned char *>(fileDecrypted.data());
+  unsigned long long fileContentLength = (unsigned long long) // fileContent.length();
+  file.size();
+  auto const fileContent = file.readAll().toStdString();
+  file.close();
+  unsigned char const *rawFileContent =
+      reinterpret_cast<unsigned char const *>(fileContent.c_str());
+  unsigned char* nsec = nullptr;
+  unsigned char const * ad = nullptr;
+  unsigned long long adLength = 0;
+  unsigned char nonce[crypto_aead_xchacha20poly1305_ietf_NPUBBYTES]{};
+  randombytes_buf(nonce, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+  unsigned char const * secretKey = reinterpret_cast<unsigned char const *>(m_key.data());
+
+  if (crypto_aead_xchacha20poly1305_ietf_decrypt(
+        mFileDecrypted, &fileDecryptedLength, nsec,
+        rawFileContent, fileContentLength, ad, adLength, nonce, secretKey) != 0)
+  {
+    QMessageBox::critical(this, "Error", "unable to decrypt the encrypted text");
+    return;
+  }
+  fileDecrypted.resize(fileDecryptedLength);
+
+  auto const byteContent = QByteArray::fromStdString(fileDecrypted);
+  readUnencryptedData(byteContent);
 }
 
-void SettingsDialog::readEncryptedFile(QFile& file) {
+void SettingsDialog::readUnencryptedData(QByteArray const & fileContent) {
+  auto const rootDataList = QJsonDocument::fromJson(fileContent).array();
 
+  m_apiInfo.clear();
+  for (int i = 0; i < rootDataList.size(); ++i) {
+    auto const dataObject = rootDataList[i].toObject();
+    auto const exchange = korrelator::stringToExchangeName(
+          dataObject.value("name").toString());
+    if (exchange == korrelator::exchange_name_e::none)
+      continue;
+
+    korrelator::api_data_t data;
+    data.spotApiKey = dataObject.value("spot_api_key").toString();
+    data.spotApiSecret = dataObject.value("spot_api_secret").toString();
+    data.spotApiPassphrase = dataObject.value("spot_api_passphrase").toString();
+    data.futuresApiKey = dataObject.value("futures_api_key").toString();
+    data.futuresApiSecret = dataObject.value("futures_api_secret").toString();
+    data.futuresApiPassphrase = dataObject.value("futures_api_passphrase").toString();
+
+    if (data.futuresApiKey.isEmpty() && !data.spotApiKey.isEmpty())
+      data.futuresApiKey = data.spotApiKey;
+
+    if (data.futuresApiSecret.isEmpty() && !data.spotApiSecret.isEmpty())
+      data.futuresApiSecret = data.spotApiSecret;
+
+    m_apiInfo[exchange] = std::move(data);
+  }
+
+  ui->exchangeCombo->clear();
+  auto const exchanges = m_apiInfo.uniqueKeys();
+  for (int i = 0; i < exchanges.size(); ++i)
+    ui->exchangeCombo->addItem(korrelator::exchangeNameToString(exchanges[i]));
+
+  if (ui->exchangeCombo->count() != 0)
+    ui->exchangeCombo->setCurrentIndex(0);
 }
 
 SettingsDialog::api_data_map_t SettingsDialog::getApiDataMap() {

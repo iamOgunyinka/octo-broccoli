@@ -57,9 +57,10 @@ kucoin_ws::kucoin_ws(net::io_context &ioContext, ssl::context &sslContext,
       m_isSpotTrade(tradeType == trade_type_e::spot) {}
 
 kucoin_ws::~kucoin_ws() {
+  resetPingTimer();
   m_resolver.reset();
   m_sslWebStream.reset();
-  resetBuffer();
+  m_readWriteBuffer.reset();
   m_response.reset();
   m_instanceServers.clear();
   m_websocketToken.clear();
@@ -71,11 +72,12 @@ void kucoin_ws::restApiInitiateConnection() {
   if (m_requestedToStop)
     return;
 
+  resetPingTimer();
   m_websocketToken.clear();
   m_tokensSubscribedFor = false;
 
   auto const url = m_isSpotTrade ? constants::kucoin_https_spot_host
-                                 : constants::kc_futures_api_url;
+                                 : constants::kc_futures_api_host;
   m_resolver.emplace(m_ioContext);
   m_resolver->async_resolve(
       url, "https",
@@ -97,23 +99,24 @@ void kucoin_ws::restApiConnectToResolvedNames(
   beast::get_lowest_layer(*m_sslWebStream)
       .async_connect(resolvedNames,
                      [this](auto const errorCode,
-                            resolver::results_type::endpoint_type const &) {
+                            resolver::results_type::endpoint_type const &ep) {
                        if (errorCode) {
                          qDebug() << errorCode.message().c_str();
                          return;
                        }
-                       restApiPerformSSLHandshake();
+                       restApiPerformSSLHandshake(ep.port());
                      });
 }
 
-void kucoin_ws::restApiPerformSSLHandshake() {
-  auto const url = m_isSpotTrade ? constants::kucoin_https_spot_host
-                                 : constants::kc_futures_api_url;
+void kucoin_ws::restApiPerformSSLHandshake(int const) {
+  std::string const url = (m_isSpotTrade ? constants::kucoin_https_spot_host
+                                         : constants::kc_futures_api_host);
+      // + std::string(":") + std::to_string(port);
 
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(15));
   if (!SSL_set_tlsext_host_name(m_sslWebStream->next_layer().native_handle(),
-                                url)) {
+                                url.c_str())) {
     auto const ec = beast::error_code(static_cast<int>(::ERR_get_error()),
                                       net::error::get_ssl_category());
     qDebug() << ec.message().c_str();
@@ -152,11 +155,11 @@ void kucoin_ws::restApiSendRequest() {
 }
 
 void kucoin_ws::restApiReceiveResponse() {
-  resetBuffer();
+  m_readWriteBuffer.emplace();
   m_response.emplace();
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(20));
-  beast::http::async_read(m_sslWebStream->next_layer(), m_readWriteBuffer,
+  beast::http::async_read(m_sslWebStream->next_layer(), *m_readWriteBuffer,
                           *m_response,
                           [this](auto const errorCode, auto const) {
                             if (errorCode) {
@@ -217,15 +220,13 @@ void kucoin_ws::restApiInterpretHttpResponse() {
   }
 
   m_response.reset();
-  resetBuffer();
 
-  if (!m_instanceServers.empty() && !m_websocketToken.empty())
+  if (!m_instanceServers.empty() && !m_websocketToken.empty()) {
+    /*for (auto const &serverInstance: m_instanceServers)
+      qDebug() << serverInstance.endpoint.c_str()
+               << m_websocketToken.c_str(); */
     initiateWebsocketConnection();
-}
-
-void kucoin_ws::resetBuffer() {
-  m_readWriteBuffer.consume(m_readWriteBuffer.size());
-  m_readWriteBuffer.clear();
+  }
 }
 
 void kucoin_ws::addSubscription(QString const &tokenName) {
@@ -275,18 +276,17 @@ void kucoin_ws::websockConnectToResolvedNames(
   beast::get_lowest_layer(*m_sslWebStream)
       .async_connect(resolvedNames,
                      [this](auto const errorCode,
-                            resolver::results_type::endpoint_type const &ep) {
+                            resolver::results_type::endpoint_type const &) {
                        if (errorCode) {
                          qDebug() << errorCode.message().c_str();
                          return;
                        }
-                       websockPerformSSLHandshake(ep);
+                       websockPerformSSLHandshake();
                      });
 }
 
-void kucoin_ws::websockPerformSSLHandshake(
-    resolver::results_type::endpoint_type const &ep) {
-  auto const host = m_uri.host() + ":" + std::to_string(ep.port());
+void kucoin_ws::websockPerformSSLHandshake() {
+  auto const host = m_uri.host();
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(10));
   if (!SSL_set_tlsext_host_name(m_sslWebStream->next_layer().native_handle(),
@@ -304,6 +304,10 @@ void kucoin_ws::negotiateWebsocketConnection() {
   m_sslWebStream->next_layer().async_handshake(
       ssl::stream_base::client, [this](beast::error_code const &ec) {
         if (ec) {
+
+          if (ec.category() == net::error::get_ssl_category()) {
+            qDebug() << "SSL Category error";
+          }
           qDebug() << ec.message().c_str();
           return;
         }
@@ -313,6 +317,7 @@ void kucoin_ws::negotiateWebsocketConnection() {
 }
 
 void kucoin_ws::performWebsocketHandshake() {
+  /*
   auto const &instanceData = m_instanceServers.back();
   auto opt = ws::stream_base::timeout();
   opt.idle_timeout = std::chrono::milliseconds(instanceData.pingTimeoutMs);
@@ -329,7 +334,7 @@ void kucoin_ws::performWebsocketHandshake() {
           return restApiInitiateConnection();
         }
       });
-
+  */
   auto const path = m_uri.path() + "?token=" + m_websocketToken +
                     "&connectId=" + get_random_string(10);
   m_sslWebStream->async_handshake(m_uri.host(), path,
@@ -338,14 +343,50 @@ void kucoin_ws::performWebsocketHandshake() {
                                       qDebug() << errorCode.message().c_str();
                                       return;
                                     }
+                                    startPingTimer();
                                     waitForMessages();
                                   });
 }
 
+void kucoin_ws::resetPingTimer() {
+  if (m_pingTimer) {
+    boost::system::error_code ec;
+    m_pingTimer->cancel(ec);
+    m_pingTimer.reset();
+  }
+}
+
+void kucoin_ws::onPingTimerTick(boost::system::error_code const &ec) {
+  if (ec) {
+    qDebug() << "Error" << ec.message().c_str();
+    return;
+  }
+
+  m_sslWebStream->async_ping({}, [this](boost::system::error_code const &){
+    auto const pingIntervalMs = m_instanceServers.back().pingIntervalMs;
+    m_pingTimer->expires_from_now(boost::posix_time::milliseconds(pingIntervalMs));
+    m_pingTimer->async_wait([this](boost::system::error_code const &errCode){
+      return onPingTimerTick(errCode);
+    });
+  });
+}
+
+void kucoin_ws::startPingTimer() {
+  resetPingTimer();
+  m_pingTimer.emplace(m_ioContext);
+
+  auto const pingIntervalMs = m_instanceServers.back().pingIntervalMs;
+  m_pingTimer->expires_from_now(
+        boost::posix_time::milliseconds(pingIntervalMs));
+  m_pingTimer->async_wait([this] (boost::system::error_code const &ec) {
+    onPingTimerTick(ec);
+  });
+}
+
 void kucoin_ws::waitForMessages() {
-  resetBuffer();
+  m_readWriteBuffer.emplace();
   m_sslWebStream->async_read(
-      m_readWriteBuffer,
+      *m_readWriteBuffer,
       [this](beast::error_code const errorCode, std::size_t const) {
         if (errorCode == net::error::operation_aborted) {
           qDebug() << errorCode.message().c_str();
@@ -364,15 +405,12 @@ void kucoin_ws::interpretGenericMessages() {
     return;
 
   char const *bufferCstr =
-      static_cast<char const *>(m_readWriteBuffer.cdata().data());
-  size_t const dataLength = m_readWriteBuffer.size();
+      static_cast<char const *>(m_readWriteBuffer->cdata().data());
+  size_t const dataLength = m_readWriteBuffer->size();
   auto const optPrice =
       kuCoinGetCoinPrice(bufferCstr, dataLength, m_isSpotTrade);
-  if (optPrice != -1.0) {
+  if (optPrice != -1.0)
     m_priceResult = optPrice;
-
-    qDebug() << "KuCoin" << m_tokenList << m_priceResult;
-  }
 
   if (!m_tokensSubscribedFor)
     return makeSubscription();
@@ -409,7 +447,7 @@ void kucoin_ws::makeSubscription() {
 std::size_t get_random_integer() {
   static std::random_device rd{};
   static std::mt19937 gen{rd()};
-  static std::uniform_int_distribution<> uid(1, 100);
+  static std::uniform_int_distribution<> uid(1, 20);
   return uid(gen);
 }
 

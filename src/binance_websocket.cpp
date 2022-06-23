@@ -139,11 +139,8 @@ void binance_ws::interpretGenericMessages() {
   char const *bufferCstr =
       static_cast<char const *>(m_readBuffer->cdata().data());
   auto const optPrice = binanceGetCoinPrice(bufferCstr, m_readBuffer->size());
-  if (optPrice != -1.0) {
+  if (optPrice != -1.0)
     m_priceResult = optPrice;
-
-    qDebug() << "Binance" << m_tokenName.tokenName << m_priceResult;
-  }
 
   if (!m_tokenName.subscribed)
     return makeSubscription();

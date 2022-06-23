@@ -22,10 +22,11 @@ public:
 
   static api_data_map_t getApiDataMap();
   auto& apiDataMap() { return m_apiInfo; }
+
 private:
   void readConfigurationFile();
-  void readUnencryptedJsonFile(QFile&);
   void readEncryptedFile(QFile&);
+  void readUnencryptedData(QByteArray const &);
   void processJsonList(QJsonArray&);
   void writeEncryptedFile(QByteArray const &);
   void writeUnencryptedFile(QByteArray const &);
