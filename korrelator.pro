@@ -17,7 +17,7 @@ Release:LIBS += "E:\\vcpkg\\installed\\x64-windows\\lib\\libcrypto.lib" \
               "E:\\vcpkg\\installed\\x64-windows\\lib\\libsodium.lib"
 
 QMAKE_CXXFLAGS += -bigobj
-#Debug:DEFINES += TESTNET=1
+#DEFINES += TESTNET=1
 
 # You can make your code fail to compile if it uses deprecated APIs.
 # In order to do so, uncomment the following line.

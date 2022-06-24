@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE QtCreatorProject>
-<!-- Written by QtCreator 7.0.0, 2022-06-22T17:59:49. -->
+<!-- Written by QtCreator 7.0.0, 2022-06-24T10:04:29. -->
 <qtcreator>
  <data>
   <variable>EnvironmentId</variable>
@@ -81,7 +81,35 @@
     <value type="QString" key="ClangTools.DiagnosticConfig">Builtin.DefaultTidyAndClazy</value>
     <value type="int" key="ClangTools.ParallelJobs">3</value>
     <valuelist type="QVariantList" key="ClangTools.SelectedDirs"/>
-    <valuelist type="QVariantList" key="ClangTools.SelectedFiles"/>
+    <valuelist type="QVariantList" key="ClangTools.SelectedFiles">
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/kc_https_request.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/order_model.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/settingsdialog.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/websocket_manager.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/kc_https_request.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/utils.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/crypto.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/websocket_manager.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/maindialog.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/sthread.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/uri.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/kc_websocket.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/maindialog.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/container.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/binance_websocket.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/order_model.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/kc_websocket.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/binance_https_request.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/tokens.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/uri.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/settingsdialog.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/constants.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/crypto.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/src/binance_https_request.cpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/binance_websocket.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/include/constants.hpp</value>
+     <value type="QString">C:/Users/VAI-DEV-001/Documents/QtProjects/korrelator/main.cpp</value>
+    </valuelist>
     <valuelist type="QVariantList" key="ClangTools.SuppressedDiagnostics"/>
     <value type="bool" key="ClangTools.UseGlobalSettings">true</value>
    </valuemap>

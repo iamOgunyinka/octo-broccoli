@@ -131,7 +131,7 @@ private:
                                                     double const keyEnd,
                                                     bool const updateGraph);
 
-  void sendExchangeRequest(korrelator::model_data_t&,
+  void sendExchangeRequest(const korrelator::model_data_t &,
                            exchange_name_e const, trade_type_e const tradeType,
                            korrelator::cross_over_data_t const &);
   static void tradeExchangeTokens(

@@ -36,7 +36,7 @@ public:
 
   bool insertRows(int row, int count,
                   const QModelIndex &parent = QModelIndex()) override;
-  void AddData(model_data_t &&);
+  void AddData(model_data_t const &);
   void refreshModel ();
   model_data_t* front() {
     if (m_modelData.empty())

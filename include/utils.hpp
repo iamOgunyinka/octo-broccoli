@@ -6,7 +6,7 @@
 namespace korrelator {
 
 enum class trade_type_e { spot, futures, unknown };
-enum class exchange_name_e { binance, kucoin, none };
+enum class exchange_name_e { binance, ftx, kucoin, none };
 enum class trade_action_e { buy, sell, nothing };
 enum class market_type_e { market, limit, unknown };
 enum tick_line_type_e { normal, ref, all, special };
@@ -22,6 +22,9 @@ struct api_data_t {
 
 struct trade_config_data_t {
   QString symbol;
+  QString baseCurrency;
+  QString quoteCurrency;
+
   double baseAmount = 0.0;
   double size = 0.0;
   double multiplier = 0.0; // only for KuCoin
@@ -35,6 +38,8 @@ struct trade_config_data_t {
   trade_type_e tradeType = trade_type_e::unknown;
   exchange_name_e exchange = exchange_name_e::none;
   market_type_e marketType = market_type_e::unknown;
+
+  trade_config_data_t* oppositeSide = nullptr;
 };
 
 struct internal_address_t {

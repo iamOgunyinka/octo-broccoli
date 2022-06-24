@@ -8,15 +8,13 @@
 #include "utils.hpp"
 #include <string>
 #include <optional>
+#include <set>
 
 namespace beast = boost::beast;
 namespace net = boost::asio;
 namespace http = beast::http;
 namespace ssl = boost::asio::ssl;
 
-namespace rapidjson {
-
-}
 namespace korrelator {
 using tcp = boost::asio::ip::tcp;
 
@@ -32,6 +30,7 @@ class binance_https_plug {
   double m_averagePriceExecuted = 0.0;
   double m_finalSizePurchased = 0.0;
   int64_t m_binanceOrderID = -1;
+  std::set<int64_t> m_fillsTradeIds;
 
   net::io_context &m_ioContext;
   ssl::context &m_sslContext;
@@ -40,9 +39,9 @@ class binance_https_plug {
   QString const m_apiSecret;
   QString m_userOrderID;
   QString m_errorString;
-  beast::ssl_stream<beast::tcp_stream> m_tcpStream;
   tcp::resolver m_resolver;
   beast::flat_buffer m_readBuffer;
+  std::optional<beast::ssl_stream<beast::tcp_stream>> m_tcpStream;
   std::optional<http::response<http::string_body>> m_httpResponse;
   std::optional<http::request<http::empty_body>> m_httpRequest;
 
@@ -69,11 +68,12 @@ public:
                      trade_type_e const tradeType, api_data_t const &apiData,
                      trade_config_data_t *tradeConfig);
   ~binance_https_plug();
+  void setLeverage();
   void setPrice(double const price) {
     m_price = price;
   }
 
-  double averagePrice() const { return m_averagePriceExecuted; }
+  double averagePrice() const;
   QString errorString() const { return m_errorString; }
   void startConnect();
 };

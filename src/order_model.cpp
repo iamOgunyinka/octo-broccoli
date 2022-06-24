@@ -60,7 +60,7 @@ QVariant order_model::data(const QModelIndex &index, int role) const {
   if (!index.isValid())
     return QVariant();
 
-  if (role == Qt::DisplayRole) {
+  if (role == Qt::DisplayRole || role == Qt::ToolTipRole) {
     auto const &d = m_modelData[index.row()];
     switch (index.column()) {
     case 0:
@@ -105,8 +105,8 @@ bool order_model::insertRows(int row, int count, const QModelIndex &parent) {
   return true;
 }
 
-void order_model::AddData(model_data_t &&data) {
-  m_modelData.push_front(std::move(data));
+void order_model::AddData(model_data_t const &data) {
+  m_modelData.push_front(data);
   insertRows(0, 1);
 }
 

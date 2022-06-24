@@ -45,8 +45,8 @@ public:
   trade_type_e tradeType;
   exchange_name_e exchange = exchange_name_e::none;
 
-  QString baseCurrency; // needed by KuCoin
-  QString quoteCurrency; // needed by KuCoin
+  QString baseCurrency;
+  QString quoteCurrency;
   QString symbolName;
   QString legendName;
   void reset();
