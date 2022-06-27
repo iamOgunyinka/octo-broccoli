@@ -12,9 +12,9 @@
 #include <QNetworkRequest>
 #include <set>
 
+#include "kucoin_https_request.hpp"
 #include "constants.hpp"
 #include "container.hpp"
-#include "kc_https_request.hpp"
 #include "order_model.hpp"
 #include "qcustomplot.h"
 #include "websocket_manager.hpp"
@@ -57,8 +57,8 @@ QString exchangeNameToString(exchange_name_e const ex) {
     return "Binance";
   else if (ex == exchange_name_e::kucoin)
     return "KuCoin";
-  else if (ex == exchange_name_e::ftx)
-    return "FTX";
+  // else if (ex == exchange_name_e::ftx)
+  //  return "FTX";
   return QString();
 }
 
@@ -84,8 +84,8 @@ exchange_name_e stringToExchangeName(QString const &name) {
     return exchange_name_e::binance;
   else if (name_.compare("kucoin", Qt::CaseInsensitive) == 0)
     return exchange_name_e::kucoin;
-  else if (name_.compare("ftx", Qt::CaseInsensitive) == 0)
-    return exchange_name_e::ftx;
+  // else if (name_.compare("ftx", Qt::CaseInsensitive) == 0)
+  //  return exchange_name_e::ftx;
   return exchange_name_e::none;
 }
 
@@ -442,7 +442,6 @@ void MainDialog::stopGraphPlotting() {
   ui->spotPrevButton->setEnabled(true);
   ui->startButton->setText("Start");
 
-  m_websocket.reset();
   m_graphUpdater.worker.reset();
   m_graphUpdater.thread.reset();
   m_priceUpdater.worker.reset();
@@ -451,15 +450,16 @@ void MainDialog::stopGraphPlotting() {
   m_programIsRunning = false;
   enableUIComponents(true);
 
-  for (auto &token : m_tokens)
-    token.reset();
+  // for (auto &token : m_tokens)
+  //  token.reset();
 
-  for (auto &token : m_refs)
-    token.reset();
+  // for (auto &token : m_refs)
+  //  token.reset();
 
   korrelator::plug_data_t data;
   data.tradeType = trade_type_e::unknown;
   token_plugs.append(std::move(data));
+  m_websocket.reset();
 }
 
 int MainDialog::getTimerTickMilliseconds() const {
@@ -772,24 +772,35 @@ void MainDialog::getExchangeInfo(exchange_name_e const exchange,
         tokenName = symbolObject.value("symbol").toString();
 
       auto const status = symbolObject.value("status").toString();
-
       auto iter = std::lower_bound(container.begin(), container.end(),
                                    tokenName, korrelator::token_compare_t{});
-      if (iter != container.end() &&
-          iter->symbolName.compare(tokenName, Qt::CaseInsensitive) == 0) {
-        if (status.compare("trading", Qt::CaseInsensitive) != 0)
-          container.erase(iter);
-        else {
-          iter->pricePrecision =
-              (uint8_t)symbolObject.value("pricePrecision").toInt(8);
-          iter->quantityPrecision =
-              (uint8_t)symbolObject.value("quantityPrecision").toInt(8);
-          iter->baseAssetPrecision =
-              (uint8_t)symbolObject.value("baseAssetPrecision").toInt(8);
-          iter->quotePrecision =
-              (uint8_t)symbolObject.value("quotePrecision").toInt(8);
-          iter->baseCurrency = symbolObject.value("baseAsset").toString();
-          iter->quoteCurrency = symbolObject.value("quoteAsset").toString();
+      if (iter == container.end() ||
+          iter->symbolName.compare(tokenName, Qt::CaseInsensitive) != 0)
+        continue;
+      if (status.compare("trading", Qt::CaseInsensitive) != 0) {
+        container.erase(iter);
+      } else {
+        iter->pricePrecision =
+            (uint8_t)symbolObject.value("pricePrecision").toInt(8);
+        iter->quantityPrecision =
+            (uint8_t)symbolObject.value("quantityPrecision").toInt(8);
+        iter->baseAssetPrecision =
+            (uint8_t)symbolObject.value("baseAssetPrecision").toInt(8);
+        iter->quotePrecision =
+            (uint8_t)symbolObject.value("quotePrecision").toInt(8);
+        iter->baseCurrency = symbolObject.value("baseAsset").toString();
+        iter->quoteCurrency = symbolObject.value("quoteAsset").toString();
+
+        auto const filters = symbolObject.value("filters").toArray();
+        for (int x = 0; x < filters.size(); ++x) {
+          auto const filterObject = filters[x].toObject();
+          auto const filterType = filterObject.value("filterType").toString();
+          if (filterType.compare("LOT_SIZE", Qt::CaseInsensitive) == 0) {
+            iter->tickSize = filterObject.value("stepSize").toString().toDouble();
+          } else if (filterType.compare("MIN_NOTIONAL", Qt::CaseInsensitive) == 0){
+            iter->quoteMinSize = filterObject.value("minNotional").toString()
+                .toDouble();
+          }
         }
       }
     }
@@ -852,6 +863,8 @@ void MainDialog::updateTradeConfigurationPrecisions() {
       tradeConfig.quotePrecision = iter->quotePrecision;
       tradeConfig.quoteCurrency = iter->quoteCurrency;
       tradeConfig.baseCurrency = iter->baseCurrency;
+      tradeConfig.tickSize = iter->tickSize;
+      tradeConfig.quoteMinSize = iter->quoteMinSize;
     }
   }
 }
@@ -961,9 +974,16 @@ void MainDialog::readTradesConfigFromFile() {
       if (data.marketType == korrelator::market_type_e::unknown)
         continue;
       data.size = object.value("size").toDouble();
-      data.baseAmount = object.value("baseAmount").toDouble();
+      data.baseBalance = 0.0;
+
+      // original JSON field used a wrong name for the field, the USDT
+      // in BTCUSDT was thought to be the base amount, instead of
+      // 'quote amount' that it is.
+      data.originalQuoteAmount = data.quoteAmount =
+          object.value("baseAmount").toDouble();
+
       if (data.marketType == korrelator::market_type_e::market) {
-        if (data.baseAmount == 0.0) {
+        if (data.quoteAmount == 0.0) {
           QMessageBox::critical(this, "Error",
                                 tr("You need to specify the size or the balance"
                                    " for %1/%2/%3")
@@ -1072,6 +1092,9 @@ void MainDialog::sendNetworkRequest(QUrl const &url,
             if (tokenObject.contains("quoteCurrency"))
               t.quoteCurrency = tokenObject.value("quoteCurrency").toString();
 
+            if (tokenObject.contains("quoteMinSize"))
+              t.quoteMinSize = tokenObject.value("quoteMinSize").toDouble();
+
             if (!tokenObject.contains(key)) {
               if (auto const f = tokenObject.value(key2); f.isString())
                 t.realPrice = f.toString().toDouble();
@@ -1082,6 +1105,8 @@ void MainDialog::sendNetworkRequest(QUrl const &url,
                 t.multiplier = tokenObject.value("multiplier").toDouble();
               if (tokenObject.contains("tickSize"))
                 t.tickSize = tokenObject.value("tickSize").toDouble();
+              if (tokenObject.contains("quoteMinSize"))
+                t.quoteMinSize = tokenObject.value("quoteMinSize").toDouble();
             } else {
               t.realPrice = tokenObject.value(key).toString().toDouble();
             }
@@ -1370,6 +1395,7 @@ void MainDialog::updateKuCoinTradeConfiguration() {
       if (iter != kucoinFutures.cend()) {
         configuration.multiplier = iter->multiplier;
         configuration.tickSize = iter->tickSize;
+        configuration.quoteMinSize = iter->quoteMinSize;
       }
     }
   }
@@ -1608,6 +1634,8 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   } // end for
 
   if (refResult.isResettingRef || isResettingSymbols) {
+    // qDebug() << "Ref:" << refSymbol.normalizedPrice
+    //         << "Normal:" << m_tokens[1].normalizedPrice;
     resetTickerData(refResult.isResettingRef, isResettingSymbols);
   }
 
@@ -1796,11 +1824,11 @@ void MainDialog::tradeExchangeTokens(
   using korrelator::trade_type_e;
 
   union connector_t {
-    korrelator::kc_https_plug *kucoinConnector;
+    korrelator::kucoin_https_plug *kucoinConnector;
     korrelator::binance_https_plug *binanceConnector;
   };
 
-  net::io_context ioContext;
+  auto& ioContext = korrelator::getExchangeIOContext();
   auto &sslContext = korrelator::getSSLContext();
   auto lastAction = trade_action_e::nothing;
   double lastQuantity = NAN;
@@ -1848,11 +1876,27 @@ void MainDialog::tradeExchangeTokens(
     connector_t connector;
     if (isKuCoin) {
       connector.kucoinConnector =
-          new korrelator::kc_https_plug(ioContext, sslContext, data.tradeType,
-                                        data.apiInfo, data.tradeConfig);
+          new korrelator::kucoin_https_plug(
+            ioContext, sslContext, data.tradeType,
+            data.apiInfo, data.tradeConfig);
       connector.kucoinConnector->setPrice(data.tokenPrice);
       connector.kucoinConnector->startConnect();
     } else if (data.exchange == exchange_name_e::binance) {
+      /*connector.binanceConnector = nullptr;
+      auto tradeConfig = data.tradeConfig;
+      if (tradeConfig->size < tradeConfig->multiplier &&
+          tradeConfig->size != 0.0) {
+        if (modelData) {
+          modelData->remark =
+              QString("[Ignored] The amount of %1 available(%2) is lesser than"
+                      " the minimum expected (%3)")
+              .arg(tradeConfig->quoteCurrency).arg(tradeConfig->quoteAmount)
+              .arg(tradeConfig->multiplier);
+        }
+        mainDialog->refreshModel();
+        continue;
+      }
+      */
       connector.binanceConnector = new korrelator::binance_https_plug(
           ioContext, sslContext, data.tradeType, data.apiInfo,
           data.tradeConfig);

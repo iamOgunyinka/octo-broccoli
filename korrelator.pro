@@ -24,13 +24,17 @@ QMAKE_CXXFLAGS += -bigobj
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
+  src/binance_futures_plug.cpp \
   src/binance_https_request.cpp \
+  src/binance_spots_plug.cpp \
   src/constants.cpp \
   src/crypto.cpp \
-  src/kc_https_request.cpp \
+  src/kucoin_futures_plug.cpp \
+  src/kucoin_https_request.cpp \
+  src/kucoin_spots_plug.cpp \
+  src/kucoin_websocket.cpp \
   src/settingsdialog.cpp \
   src/binance_websocket.cpp \
-  src/kc_websocket.cpp \
   src/maindialog.cpp \
   src/order_model.cpp \
   src/qcustomplot.cpp \
@@ -38,13 +42,17 @@ SOURCES += main.cpp \
   src/websocket_manager.cpp
 
 HEADERS += \
+  include/binance_futures_plug.hpp \
   include/binance_https_request.hpp \
+  include/binance_spots_plug.hpp \
   include/binance_websocket.hpp \
   include/constants.hpp \
   include/container.hpp \
   include/crypto.hpp \
-  include/kc_https_request.hpp \
-  include/kc_websocket.hpp \
+  include/kucoin_futures_plug.hpp \
+  include/kucoin_https_request.hpp \
+  include/kucoin_spots_plug.hpp \
+  include/kucoin_websocket.hpp \
   include/maindialog.hpp \
   include/order_model.hpp \
   include/qcustomplot.h \

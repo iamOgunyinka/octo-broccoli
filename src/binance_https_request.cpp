@@ -1,20 +1,7 @@
 #include "binance_https_request.hpp"
 
-#include <QDebug>
-#include <boost/asio/ssl/context.hpp>
-#include <boost/asio/strand.hpp>
-#include <boost/beast/http/read.hpp>
-#include <boost/beast/http/write.hpp>
-
-#include <rapidjson/document.h>
-#include <thread>
-
-#ifdef TESTNET
-#include <sstream>
-#endif
-
-#include "constants.hpp"
-#include "crypto.hpp"
+#include "binance_futures_plug.hpp"
+#include "binance_spots_plug.hpp"
 
 namespace korrelator {
 
@@ -25,436 +12,62 @@ double format_quantity(double const value, int decimal_places) {
   return std::trunc(value * multiplier) / multiplier;
 }
 
-void binance_https_plug::sendHttpsData() {
-  beast::get_lowest_layer(*m_tcpStream)
-      .expires_after(std::chrono::milliseconds(15'000));
-  http::async_write(*m_tcpStream, *m_httpRequest,
-                    [this](auto const &a, auto const &b) { onDataSent(a, b); });
-}
-
-void binance_https_plug::onDataSent(beast::error_code ec, std::size_t const) {
-  if (ec) {
-    qDebug() << "Problem writing\n" << ec.message().c_str();
-    return;
-  }
-  receiveData();
-}
-
-void binance_https_plug::receiveData() {
-  beast::get_lowest_layer(*m_tcpStream)
-      .expires_after(std::chrono::milliseconds(15000));
-  m_httpResponse.emplace();
-  http::async_read(
-      *m_tcpStream, m_readBuffer, *m_httpResponse,
-      [this](auto const &a, auto const &b) { onDataReceived(a, b); });
-}
-
-void binance_https_plug::setLeverage() {
-  m_currentRequest = request_type_e::leverage;
-}
-
-void binance_https_plug::doConnect() {
-  using resolver = tcp::resolver;
-
-  createRequestData();
-  auto const host = m_isSpot ? constants::binance_http_spot_host
-                             : constants::binance_http_futures_host;
-  m_resolver.async_resolve(
-      host, "https",
-      [this](auto const &errorCode, resolver::results_type const &results) {
-        if (errorCode) {
-          qDebug() << errorCode.message().c_str();
-          return;
-        }
-        onHostResolved(results);
-      });
-}
-
-void binance_https_plug::startConnect() { doConnect(); }
-
-void binance_https_plug::onHostResolved(
-    tcp::resolver::results_type const &result) {
-  m_tcpStream.emplace(m_ioContext, m_sslContext);
-  beast::get_lowest_layer(*m_tcpStream).expires_after(std::chrono::seconds(30));
-  beast::get_lowest_layer(*m_tcpStream)
-      .async_connect(result, [this](auto const &errorCode, auto const &result) {
-        if (errorCode) {
-          qDebug() << errorCode.message().c_str();
-          return;
-        }
-        performSSLHandshake(result);
-      });
-}
-
-void binance_https_plug::createLeverageRequest() {
-  using http::field;
-
-  auto &httpRequest = m_httpRequest.emplace();
-  auto const host = constants::binance_http_futures_host;
-  std::string const path = "/fapi/v1/leverage";
-  QString query =
-      "symbol=" + m_tradeConfig->symbol.toUpper() +
-      "&leverage=" + QString::number(m_tradeConfig->leverage) +
-      "&recvWindow=5000&timestamp=" + QString::number(getGMTTimeMs());
-  auto const signature =
-      hmac256_encode(query.toStdString(), m_apiSecret.toStdString(), true);
-  query +=
-      QString("&signature=") + reinterpret_cast<char const *>(signature.data());
-
-  httpRequest.method(http::verb::post);
-  httpRequest.version(11);
-  httpRequest.target(path + "?" + query.toStdString());
-  httpRequest.set(field::host, host);
-  httpRequest.set(field::content_type, "application/json");
-  httpRequest.set(field::user_agent, "postman");
-  httpRequest.set(field::accept, "*/*");
-  httpRequest.set(field::connection, "keep-alive");
-  httpRequest.set("X-MBX-APIKEY", m_apiKey.toStdString());
-  httpRequest.prepare_payload();
-}
-
-void binance_https_plug::createRequestData() {
-  using http::field;
-
-  if (!m_isSpot && m_currentRequest == request_type_e::leverage)
-    return createLeverageRequest();
-
-  QString query("symbol=" + m_tradeConfig->symbol.toUpper());
-  query += "&side=";
-  query += (m_tradeConfig->side == trade_action_e::buy ? "BUY" : "SELL");
-  if (m_isSpot)
-    query += "&newOrderRespType=FULL";
-
-  auto const marketType =
-      korrelator::marketTypeToString(m_tradeConfig->marketType);
-  query += "&type=" + marketType.toUpper();
-
-  double &size = m_tradeConfig->size;
-  double &baseAmount = m_tradeConfig->baseAmount;
-
-  if (m_tradeConfig->marketType == korrelator::market_type_e::market) {
-    if (m_isSpot) {
-      if (baseAmount != 0.0) {
-        baseAmount = format_quantity(baseAmount, m_tradeConfig->quotePrecision);
-        query += "&quoteOrderQty=";
-        query +=
-            QString::number(baseAmount, 'f', m_tradeConfig->quotePrecision);
-      } else if (size != 0.0) {
-        size = format_quantity(size, m_tradeConfig->quantityPrecision);
-        query += "&quantity=";
-        query += QString::number(size, 'f', m_tradeConfig->quantityPrecision);
-      }
-    } else { // futures
-      if (size == 0.0)
-        size =
-            ((m_tradeConfig->baseAmount / m_price) * m_tradeConfig->leverage);
-      size = format_quantity(size, m_tradeConfig->quantityPrecision);
-      query += "&quantity=";
-      query += QString::number(size, 'f', m_tradeConfig->quantityPrecision);
-    }
-  } else {
-    query += ("&timeInForce=GTC"); // Good Till Canceled
-    if (size == 0.0 && m_tradeConfig->baseAmount != 0.0)
-      size = m_tradeConfig->baseAmount / m_price;
-
-    if (!m_isSpot) // futures
-      size *= m_tradeConfig->leverage;
-
-    size = format_quantity(size, m_tradeConfig->quantityPrecision);
-    query += ("&quantity=");
-    query += QString::number(size, 'f', m_tradeConfig->quantityPrecision);
-
-    m_price = format_quantity(m_price, m_tradeConfig->pricePrecision);
-    query += ("&price=");
-    query += QString::number(m_price, 'f', m_tradeConfig->pricePrecision);
-  }
-
-  query +=
-      QString("&recvWindow=5000&timestamp=") + QString::number(getGMTTimeMs());
-
-  auto const signature =
-      hmac256_encode(query.toStdString(), m_apiSecret.toStdString(), true);
-  query +=
-      QString("&signature=") + reinterpret_cast<char const *>(signature.data());
-  qDebug() << "New order" << query;
-
-  auto const host = m_isSpot ? constants::binance_http_spot_host
-                             : constants::binance_http_futures_host;
-
-  std::string const path = m_isSpot ? "/api/v3/order" : "/fapi/v1/order";
-  auto &httpRequest = m_httpRequest.emplace();
-
-  httpRequest.method(http::verb::post);
-  httpRequest.version(11);
-  httpRequest.target(path + "?" + query.toStdString());
-  httpRequest.set(field::host, host);
-  httpRequest.set(field::content_type, "application/json");
-  httpRequest.set(field::user_agent, "postman");
-  httpRequest.set(field::accept, "*/*");
-  httpRequest.set(field::connection, "keep-alive");
-  httpRequest.set("X-MBX-APIKEY", m_apiKey.toStdString());
-}
-
-void binance_https_plug::performSSLHandshake(
-    tcp::resolver::results_type::endpoint_type const &ip) {
-  beast::get_lowest_layer(*m_tcpStream).expires_after(std::chrono::seconds(15));
-  auto const host = (m_isSpot ? constants::binance_http_spot_host
-                              : constants::binance_http_futures_host) +
-                    std::string(":") + std::to_string(ip.port());
-  if (!SSL_set_tlsext_host_name(m_tcpStream->native_handle(), host.c_str())) {
-    auto const ec = beast::error_code(static_cast<int>(::ERR_get_error()),
-                                      net::error::get_ssl_category());
-    qDebug() << ec.message().c_str();
-    return;
-  }
-
-  m_tcpStream->async_handshake(ssl::stream_base::client,
-                               [this](beast::error_code const ec) {
-                                 if (ec) {
-                                   qDebug() << ec.message().c_str();
-                                   return;
-                                 }
-                                 return sendHttpsData();
-                               });
-}
-
 binance_https_plug::binance_https_plug(net::io_context &ioContext,
                                        ssl::context &sslContext,
                                        trade_type_e const tradeType,
                                        api_data_t const &apiData,
                                        trade_config_data_t *tradeConfig)
-    : m_isSpot(tradeType == trade_type_e::spot),
-      m_tradeAction(tradeConfig->side), m_ioContext(ioContext),
-      m_sslContext(sslContext), m_tradeConfig(tradeConfig),
-      m_apiKey((tradeType == trade_type_e::spot ? apiData.spotApiKey
-                                                : apiData.futuresApiKey)),
-      m_apiSecret((tradeType == trade_type_e::spot ? apiData.spotApiSecret
-                                                   : apiData.futuresApiSecret)),
-      m_resolver(ioContext), m_tcpStream(std::nullopt) {}
-
-binance_https_plug::~binance_https_plug() {
-  m_httpRequest.reset();
-  m_httpResponse.reset();
-  m_tcpStream.reset();
+    : m_tradeType(tradeType) {
+  if (trade_type_e::spot == m_tradeType) {
+    m_binancePlug.spot = new details::binance_spots_plug(ioContext, sslContext,
+                                                         apiData, tradeConfig);
+  } else {
+    m_binancePlug.futures = new details::binance_futures_plug(
+        ioContext, sslContext, apiData, tradeConfig);
+  }
 }
 
-void binance_https_plug::onDataReceived(beast::error_code ec,
-                                        std::size_t const bytesReceived) {
-  if (ec) {
-    qDebug() << ec.message().c_str() << bytesReceived;
-    return;
-  }
-
-  auto &body = m_httpResponse->body();
-  char const *const str = body.c_str();
-  size_t const length = body.length();
-  if (m_currentRequest == request_type_e::leverage)
-    return processLeverageResponse(str, length);
-  processOrderResponse(str, length);
+void binance_https_plug::setLeverage() {
+  if (m_tradeType == trade_type_e::futures)
+    m_binancePlug.futures->setLeverage();
 }
 
-#ifdef _MSC_VER
-#undef GetObject
-#endif
-
-void binance_https_plug::processLeverageResponse(char const *str,
-                                                 size_t const length) {
-  rapidjson::Document doc;
-  doc.Parse(str, length);
-  if (!doc.IsObject())
-    return createErrorResponse();
-
-  try {
-    auto const jsonRoot = doc.GetObject();
-    auto const leverageIter = jsonRoot.FindMember("leverage");
-    if (leverageIter == jsonRoot.MemberEnd())
-      return createErrorResponse();
-    auto const leverage = leverageIter->value.GetInt();
-    if (leverage != m_tradeConfig->leverage)
-      return createErrorResponse();
-
-    m_currentRequest = request_type_e::market;
-    createRequestData();
-    return sendHttpsData();
-  } catch (std::exception const &e) {
-    qDebug() << e.what();
-  } catch (...) {
-  }
-  return createErrorResponse();
+void binance_https_plug::setPrice(double const price) {
+  if (m_tradeType == trade_type_e::futures)
+    return m_binancePlug.futures->setPrice(price);
+  m_binancePlug.spot->setPrice(price);
 }
 
-void binance_https_plug::processOrderResponse(char const *str,
-                                              size_t const length) {
-  rapidjson::Document doc;
-  doc.Parse(str, length);
-  if (!doc.IsObject())
-    return createErrorResponse();
-
-  qDebug() << str;
-
-  try {
-    auto const jsonRoot = doc.GetObject();
-    auto const statusIter = jsonRoot.FindMember("status");
-    auto const assignedOrderIDIter = jsonRoot.FindMember("clientOrderId");
-    if (statusIter == jsonRoot.MemberEnd() ||
-        assignedOrderIDIter == jsonRoot.MemberEnd())
-      return createErrorResponse();
-    QString const status = statusIter->value.GetString();
-    m_userOrderID = assignedOrderIDIter->value.GetString();
-    bool const isFullyFilled =
-        status.compare("filled", Qt::CaseInsensitive) == 0;
-    if (status.compare("new", Qt::CaseInsensitive) == 0) {
-      auto const binanceOrderIDIter = jsonRoot.FindMember("orderId");
-      if (binanceOrderIDIter != jsonRoot.MemberEnd() &&
-          (binanceOrderIDIter->value.IsInt() ||
-           binanceOrderIDIter->value.IsInt64())) {
-        if (binanceOrderIDIter->value.IsInt64())
-          m_binanceOrderID = binanceOrderIDIter->value.GetInt64();
-        else if (binanceOrderIDIter->value.IsInt())
-          m_binanceOrderID = (int64_t)binanceOrderIDIter->value.GetInt();
-      }
-
-      return startMonitoringNewOrder();
-    } else if (isFullyFilled ||
-               status.compare("partially_filled", Qt::CaseInsensitive) == 0) {
-      if (m_isSpot) {
-        bool const isBuy = m_tradeConfig->side == trade_action_e::buy;
-        auto const fillsIter = jsonRoot.FindMember("fills");
-        auto const &baseCurrency = m_tradeConfig->baseCurrency;
-        double totalCommission = 0.0;
-        if (fillsIter != jsonRoot.MemberEnd()) {
-          auto const fills = fillsIter->value.GetArray();
-          for (auto iter = fills.Begin(); iter != fills.End(); ++iter) {
-            auto const fillsObject = iter->GetObject();
-            auto const priceIter = fillsObject.FindMember("price");
-            auto const qtyIter = fillsObject.FindMember("qty");
-            auto const tradeIDIter = fillsObject.FindMember("tradeId");
-            auto const commissionAssetIter =
-                fillsObject.FindMember("commissionAsset");
-            auto const commissionIter = fillsObject.FindMember("commission");
-            if (qtyIter != fillsObject.MemberEnd() &&
-                tradeIDIter != fillsObject.MemberEnd() &&
-                priceIter != fillsObject.MemberEnd() &&
-                commissionIter != fillsObject.MemberEnd() &&
-                commissionAssetIter != fillsObject.MemberEnd()) {
-              auto const newInsert =
-                  m_fillsTradeIds.insert(tradeIDIter->value.GetInt64());
-              if (newInsert.second) { // insertion was successful
-                m_averagePriceExecuted +=
-                    std::stod(priceIter->value.GetString());
-                m_finalSizePurchased += std::stod(qtyIter->value.GetString());
-                if (baseCurrency.compare(commissionAssetIter->value.GetString(),
-                                         Qt::CaseInsensitive) == 0) {
-                  auto const commission =
-                      std::stod(commissionIter->value.GetString());
-                  totalCommission += commission;
-                  if (isBuy)
-                    m_finalSizePurchased -= commission;
-                }
-              }
-            }
-          }
-        }
-
-        if (isFullyFilled) {
-          auto otherSide = m_tradeConfig->oppositeSide;
-          if (isBuy) {
-            otherSide->size = m_finalSizePurchased;
-            otherSide->baseAmount = 0.0;
-          } else {
-            auto const cummulativeQuoteQtyIter =
-                jsonRoot.FindMember("cummulativeQuoteQty");
-            if (cummulativeQuoteQtyIter != jsonRoot.MemberEnd()) {
-              otherSide->baseAmount =
-                  std::stod(cummulativeQuoteQtyIter->value.GetString());
-              otherSide->baseAmount -= totalCommission;
-            }
-            otherSide->size = 0.0;
-          }
-        }
-      } else {
-        auto const avgPriceIter = jsonRoot.FindMember("avgPrice");
-        auto const executedQtyIter = jsonRoot.FindMember("executedQty");
-        if (avgPriceIter != jsonRoot.MemberEnd() &&
-            avgPriceIter->value.IsString()) {
-          m_averagePriceExecuted += std::stod(avgPriceIter->value.GetString());
-        }
-
-        if (executedQtyIter != jsonRoot.MemberEnd() &&
-            executedQtyIter->value.IsString()) {
-          m_finalSizePurchased += std::stod(executedQtyIter->value.GetString());
-        }
-      }
-
-      if (status.compare("partially_filled", Qt::CaseInsensitive) == 0)
-        return startMonitoringNewOrder();
-      return disconnectConnection();
-    }
-    return startMonitoringNewOrder();
-  } catch (std::exception const &e) {
-    qDebug() << e.what();
-    return createErrorResponse();
-  } catch (...) {
-    return createErrorResponse();
-  }
+void binance_https_plug::startConnect() {
+  if (m_tradeType == trade_type_e::futures)
+    return m_binancePlug.futures->startConnect();
+  m_binancePlug.spot->startConnect();
 }
 
 double binance_https_plug::averagePrice() const {
-  if (m_isSpot && !m_fillsTradeIds.empty()) {
-    return m_averagePriceExecuted / m_fillsTradeIds.size();
-  }
-  return m_averagePriceExecuted;
+  if (m_tradeType == trade_type_e::futures)
+    return m_binancePlug.futures->averagePrice();
+  return m_binancePlug.spot->averagePrice();
 }
 
-void binance_https_plug::createErrorResponse() {
-  m_errorString = m_httpResponse->body().c_str();
-  qDebug() << "There must have been an error" << m_errorString;
-  return disconnectConnection();
+QString binance_https_plug::errorString() const {
+  if (m_tradeType == trade_type_e::futures)
+    return m_binancePlug.futures->errorString();
+  return m_binancePlug.spot->errorString();
 }
 
-void binance_https_plug::disconnectConnection() {
-  m_tcpStream->async_shutdown(
-      [](boost::system::error_code const) { qDebug() << "Stream closed"; });
-}
-
-void binance_https_plug::startMonitoringNewOrder() {
-  // allow for enough time before querying the exchange
-  std::this_thread::sleep_for(std::chrono::milliseconds(600));
-  createMonitoringRequest();
-  sendHttpsData();
-}
-
-void binance_https_plug::createMonitoringRequest() {
-  using http::field;
-
-  auto const host = m_isSpot ? constants::binance_http_spot_host
-                             : constants::binance_http_futures_host;
-  QString urlQuery("symbol=" + m_tradeConfig->symbol.toUpper());
-  if (m_binanceOrderID != -1)
-    urlQuery += "&orderId=" + QString::number(m_binanceOrderID);
+binance_https_plug::~binance_https_plug() {
+  if (m_tradeType == trade_type_e::futures)
+    delete m_binancePlug.futures;
   else
-    urlQuery += "&origClientOrderId=" + m_userOrderID;
+    delete m_binancePlug.spot;
+}
 
-  urlQuery += "&timestamp=" + QString::number(getGMTTimeMs());
-  auto const signature =
-      hmac256_encode(urlQuery.toStdString(), m_apiSecret.toStdString(), true);
-  urlQuery +=
-      QString("&signature=") + reinterpret_cast<char const *>(signature.data());
 
-  std::string const path = m_isSpot ? "/api/v3/order" : "/fapi/v1/order";
-  auto &httpRequest = m_httpRequest.emplace();
-  httpRequest.method(http::verb::get);
-  httpRequest.version(11);
-  httpRequest.target(path + "?" + urlQuery.toStdString());
-  httpRequest.set(field::host, host);
-  httpRequest.set(field::content_type, "application/json");
-  httpRequest.set(field::user_agent, "postman");
-  httpRequest.set(field::accept, "*/*");
-  httpRequest.set(field::connection, "keep-alive");
-  httpRequest.set("X-MBX-APIKEY", m_apiKey.toStdString());
-  httpRequest.prepare_payload();
-
-  qDebug() << urlQuery;
+net::io_context& getExchangeIOContext() {
+  static std::unique_ptr<net::io_context> ioContext =
+      std::make_unique<net::io_context>();
+  return *ioContext;
 }
 
 } // namespace korrelator

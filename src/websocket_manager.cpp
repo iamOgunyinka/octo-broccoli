@@ -1,7 +1,7 @@
 #include "websocket_manager.hpp"
 
 #include "binance_websocket.hpp"
-#include "kc_websocket.hpp"
+#include "kucoin_websocket.hpp"
 
 namespace korrelator {
 

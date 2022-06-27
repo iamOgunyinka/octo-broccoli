@@ -12,36 +12,20 @@
 #include "uri.hpp"
 
 namespace boost {
-
 namespace asio {
-
 namespace ssl {
-
 class context;
-
 }
-
 class io_context;
-
 }
-
 }
-
 
 namespace korrelator {
-
 namespace net = boost::asio;
 namespace ssl = net::ssl;
 namespace beast = boost::beast;
 namespace ws = beast::websocket;
 namespace ip = net::ip;
-
-struct instance_server_data_t {
-  std::string endpoint; // wss://foo.com/path
-  int pingIntervalMs = 0;
-  int pingTimeoutMs = 0;
-  int encryptProtocol = 0; // bool encrypt or not
-};
 
 enum class trade_type_e;
 enum class exchange_name_e;
@@ -49,6 +33,12 @@ enum class exchange_name_e;
 // kucoin websocket
 class kucoin_ws {
 
+  struct instance_server_data_t {
+    std::string endpoint; // wss://foo.com/path
+    int pingIntervalMs = 0;
+    int pingTimeoutMs = 0;
+    int encryptProtocol = 0; // bool encrypt or not
+  };
   using resolver = ip::tcp::resolver;
   using results_type = resolver::results_type;
 

@@ -1,4 +1,4 @@
-#include "kc_websocket.hpp"
+#include "kucoin_websocket.hpp"
 
 #include <QDebug>
 #include <boost/asio/io_context.hpp>

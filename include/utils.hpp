@@ -6,7 +6,7 @@
 namespace korrelator {
 
 enum class trade_type_e { spot, futures, unknown };
-enum class exchange_name_e { binance, ftx, kucoin, none };
+enum class exchange_name_e { binance/*, ftx*/, kucoin, none };
 enum class trade_action_e { buy, sell, nothing };
 enum class market_type_e { market, limit, unknown };
 enum tick_line_type_e { normal, ref, all, special };
@@ -25,10 +25,15 @@ struct trade_config_data_t {
   QString baseCurrency;
   QString quoteCurrency;
 
-  double baseAmount = 0.0;
+  double quoteAmount = 0.0;
+  double originalQuoteAmount = 0.0;
+  double quoteBalance = 0.0;
+
+  double baseBalance = 0.0;
   double size = 0.0;
   double multiplier = 0.0; // only for KuCoin
   double tickSize = 0.0; // only for KuCoin
+  double quoteMinSize = 0.0;
   int leverage = 0;
   int8_t pricePrecision = -1;
   int8_t quantityPrecision = pricePrecision;
@@ -54,7 +59,11 @@ QString marketTypeToString(market_type_e const);
 char get_random_char();
 std::string get_random_string(std::size_t);
 std::size_t get_random_integer();
-// QString roundToPrecision(double const value, int const precision);
+
+template <typename Container, typename... IterList>
+bool any_of(Container const &container, IterList &&... iter_list) {
+  return (... || (container.MemberEnd() == iter_list));
+}
 
 } // namespace korrelator
 
