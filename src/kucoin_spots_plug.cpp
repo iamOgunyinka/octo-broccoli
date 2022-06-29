@@ -155,10 +155,10 @@ bool kucoin_spots_plug::createRequestData() {
           QString::number(quoteAmount, 'f', m_tradeConfig->quotePrecision);
       writer.String(quoteAmountStr.toStdString().c_str());
     } else if (hasSizeDefined) {
-      size = format_quantity(size, m_tradeConfig->quantityPrecision);
+      size = format_quantity(size, m_tradeConfig->baseAssetPrecision);
       writer.Key("size");
       auto const sizeStr =
-          QString::number(size, 'f', m_tradeConfig->quantityPrecision);
+          QString::number(size, 'f', m_tradeConfig->baseAssetPrecision);
       writer.String(sizeStr.toStdString().c_str());
     } else if (hasSizeDefined && hasQuoteAmount) {
       throw std::runtime_error("this should never happen");
@@ -243,7 +243,9 @@ kucoin_spots_plug::kucoin_spots_plug(net::io_context &ioContext,
       m_resolver(ioContext) {}
 
 kucoin_spots_plug::~kucoin_spots_plug() {
-
+  m_readBuffer.reset();
+  m_httpRequest.reset();
+  m_httpResponse.reset();
 }
 
 void kucoin_spots_plug::onDataReceived(beast::error_code ec, std::size_t const) {
@@ -260,8 +262,6 @@ void kucoin_spots_plug::onDataReceived(beast::error_code ec, std::size_t const) 
 
   if (!doc.IsObject())
     return reportError();
-
-  qDebug() << body.c_str();
 
 #ifdef _MSC_VER
 #undef GetObject
@@ -300,17 +300,19 @@ void kucoin_spots_plug::onDataReceived(beast::error_code ec, std::size_t const) 
       JsonObject const &dataObject = dataIter->value.GetObject();
       if (m_process == process_e::market_initiated ||
           m_process == process_e::limit_initiated) {
+        m_numberOfRetries = 0;
         m_process = process_e::monitoring_successful_request;
 
         auto const orderIter = dataObject.FindMember("orderId");
         if (orderIter == dataObject.MemberEnd())
           return reportError();
+
         m_kucoinOrderID = orderIter->value.GetString();
         return startMonitoringLastOrder();
       } else if (dataObject.HasMember("orderId")) {
+        m_numberOfRetries = 0;
         m_process = process_e::monitoring_successful_request;
         m_kucoinOrderID = dataObject.FindMember("orderId")->value.GetString();
-
         return startMonitoringLastOrder();
       } else if (m_process == process_e::monitoring_successful_request) {
         return parseSuccessfulResponse(dataObject);
@@ -340,11 +342,13 @@ void kucoin_spots_plug::parseSuccessfulResponse(JsonObject const &dataObject ) {
   auto const itemsIter = dataObject.FindMember("items");
   if (itemsIter == dataObject.MemberEnd())
     return reportError();
+
   double totalCommission = 0.0;
   double totalFunds = 0.0;
   double totalSize = 0.0;
 
   auto const tradeItems = itemsIter->value.GetArray();
+  size_t n = 0;
   for (auto const &itemObject: tradeItems) {
     auto const tradeItemObject = itemObject.GetObject();
     auto const orderIdIter = tradeItemObject.FindMember("orderId");
@@ -353,6 +357,8 @@ void kucoin_spots_plug::parseSuccessfulResponse(JsonObject const &dataObject ) {
         m_kucoinOrderID.compare(
         orderIdIter->value.GetString(), Qt::CaseInsensitive) != 0)
       continue;
+
+    ++n;
     auto const priceIter = tradeItemObject.FindMember("price");
     auto const sizeIter = tradeItemObject.FindMember("size");
     auto const fundsIter = tradeItemObject.FindMember("funds");
@@ -372,6 +378,17 @@ void kucoin_spots_plug::parseSuccessfulResponse(JsonObject const &dataObject ) {
     }
   }
 
+  if (totalFunds == 0.0 || totalSize == 0.0) {
+    if (++m_numberOfRetries >= maxOrderRetries) {
+      m_numberOfRetries = 0;
+      return reportError("Unable to check status of order made");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    return startMonitoringLastOrder();
+  }
+
+  qDebug() << m_httpResponse->body().c_str();
+
   int totalPage = 1;
   if (auto iter = dataObject.FindMember("totalPage"); iter != dataObject.MemberEnd())
     totalPage = iter->value.GetInt();
@@ -379,8 +396,8 @@ void kucoin_spots_plug::parseSuccessfulResponse(JsonObject const &dataObject ) {
   if (totalPage > 1)
     return processRemainingDataPage();
 
-  if (tradeItems.Size() != 0)
-    m_averagePrice /= double(tradeItems.Size());
+  if (n != 0)
+    m_averagePrice /= double(n);
 
   auto otherSide = m_tradeConfig->oppositeSide;
   if (m_tradeConfig->side == trade_action_e::buy) {
@@ -422,7 +439,8 @@ void kucoin_spots_plug::createMonitoringRequest() {
   using http::field;
 
   auto const host = constants::kucoin_https_spot_host;
-  std::string const path = "/api/v1/fills?" + m_kucoinOrderID.toStdString();
+  std::string const path = "/api/v1/fills?orderId="
+      + m_kucoinOrderID.toStdString();
 
   // Cause a small delay before grabbing the timer, the delay is needed so
   // kucoin does not return a 429 again when we check the status of the last

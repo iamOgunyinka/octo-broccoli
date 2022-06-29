@@ -12,9 +12,9 @@
 #include <QNetworkRequest>
 #include <set>
 
-#include "kucoin_https_request.hpp"
 #include "constants.hpp"
 #include "container.hpp"
+#include "kucoin_https_request.hpp"
 #include "order_model.hpp"
 #include "qcustomplot.h"
 #include "websocket_manager.hpp"
@@ -144,6 +144,7 @@ struct plug_data_t {
 } // namespace korrelator
 
 static korrelator::waitable_container_t<korrelator::plug_data_t> token_plugs{};
+static korrelator::waitable_container_t<double> graph_keys{};
 
 MainDialog::MainDialog(QWidget *parent)
     : QDialog(parent), ui(new Ui::MainDialog) {
@@ -169,6 +170,8 @@ MainDialog::MainDialog(QWidget *parent)
   }
 
   std::thread{[this] { tradeExchangeTokens(this, m_model); }}.detach();
+  std::thread{[this] { updatePlottingKey(); } }.detach();
+
   QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
     getSpotsTokens(exchange_name_e::kucoin);
     getFuturesTokens(exchange_name_e::kucoin);
@@ -437,11 +440,13 @@ void MainDialog::enableUIComponents(bool const enabled) {
 
 void MainDialog::stopGraphPlotting() {
   m_timerPlot.stop();
+
   ui->futuresNextButton->setEnabled(true);
   ui->spotNextButton->setEnabled(true);
   ui->spotPrevButton->setEnabled(true);
   ui->startButton->setText("Start");
 
+  // m_timerPlot.disconnect(m_graphUpdater.worker.get());
   m_graphUpdater.worker.reset();
   m_graphUpdater.thread.reset();
   m_priceUpdater.worker.reset();
@@ -681,7 +686,7 @@ void MainDialog::getKuCoinExchangeInfo(trade_type_e const tradeType) {
   if (tradeType == trade_type_e::futures)
     return;
   auto const fullUrl = https + korrelator::constants::kucoin_https_spot_host +
-                       QString("/api/v1/currencies");
+                       QString("/api/v1/symbols");
   QNetworkRequest request(fullUrl);
   request.setHeader(QNetworkRequest::KnownHeaders::ContentTypeHeader,
                     "application/json");
@@ -709,16 +714,26 @@ void MainDialog::getKuCoinExchangeInfo(trade_type_e const tradeType) {
     auto &container = m_watchables[(int)exchange_name_e::kucoin].spots;
     for (int i = 0; i < dataList.size(); ++i) {
       auto const itemObject = dataList[i].toObject();
-      auto const currency = itemObject.value("currency").toString();
-      auto const precision = itemObject.value("precision").toInt();
+      auto const symbol = itemObject.value("symbol").toString();
 
       auto iter = std::find_if(container.begin(), container.end(),
-                               [currency](korrelator::token_t const &a) {
-                                 return a.baseCurrency.compare(
-                                            currency, Qt::CaseInsensitive) == 0;
+                               [symbol](korrelator::token_t const &a) {
+                                 return a.symbolName.compare(
+                                            symbol, Qt::CaseInsensitive) == 0;
                                });
-      if (iter != container.end())
-        iter->quotePrecision = precision;
+      if (iter != container.end()) {
+        iter->baseMinSize = itemObject.value("baseMinSize").toString().toDouble();
+        iter->quoteMinSize = itemObject.value("quoteMinSize").toString().toDouble();
+        iter->quoteCurrency = itemObject.value("quoteCurrency").toString();
+        iter->baseCurrency = itemObject.value("baseCurrency").toString();
+
+        auto const baseIncrement = itemObject.value("baseIncrement").toString();
+        if (auto const pointIndex = baseIncrement.indexOf('.'); pointIndex != -1)
+          iter->baseAssetPrecision = baseIncrement.length() - (pointIndex + 1);
+        auto const quoteIncrement = itemObject.value("quoteIncrement").toString();
+        if (auto const pointIndex = quoteIncrement.indexOf('.'); pointIndex != -1)
+          iter->quotePrecision = quoteIncrement.length() - (pointIndex + 1);
+      }
     }
   });
 
@@ -796,10 +811,12 @@ void MainDialog::getExchangeInfo(exchange_name_e const exchange,
           auto const filterObject = filters[x].toObject();
           auto const filterType = filterObject.value("filterType").toString();
           if (filterType.compare("LOT_SIZE", Qt::CaseInsensitive) == 0) {
-            iter->tickSize = filterObject.value("stepSize").toString().toDouble();
-          } else if (filterType.compare("MIN_NOTIONAL", Qt::CaseInsensitive) == 0){
-            iter->quoteMinSize = filterObject.value("minNotional").toString()
-                .toDouble();
+            iter->tickSize =
+                filterObject.value("stepSize").toString().toDouble();
+          } else if (filterType.compare("MIN_NOTIONAL", Qt::CaseInsensitive) ==
+                     0) {
+            iter->quoteMinSize =
+                filterObject.value("minNotional").toString().toDouble();
           }
         }
       }
@@ -1369,9 +1386,13 @@ void MainDialog::onOKButtonClicked() {
 }
 
 void MainDialog::calculatePriceNormalization() {
-  size_t const tokenStartIndex = m_hasReferences ? 1 : 0;
-  for (size_t i = tokenStartIndex; i < m_tokens.size(); ++i)
-    korrelator::updateTokenIter(m_tokens[i]);
+  if (m_tokens.size() == 2 && m_hasReferences) {
+    korrelator::updateTokenIter(m_tokens[1]);
+  } else {
+    size_t const tokenStartIndex = m_hasReferences ? 1 : 0;
+    for (size_t i = tokenStartIndex; i < m_tokens.size(); ++i)
+      korrelator::updateTokenIter(m_tokens[i]);
+  }
 
   for (auto &token : m_refs)
     korrelator::updateTokenIter(token);
@@ -1380,22 +1401,29 @@ void MainDialog::calculatePriceNormalization() {
 void MainDialog::updateKuCoinTradeConfiguration() {
   using korrelator::trade_type_e;
   {
-    auto &kucoinFutures = m_watchables[(int)exchange_name_e::kucoin].futures;
     for (int x = 0; x < m_tradeConfigDataList.size(); ++x) {
       auto &configuration = m_tradeConfigDataList[x];
       if (configuration.exchange != exchange_name_e::kucoin)
         continue;
+      auto &kucoinContainer = configuration.tradeType == trade_type_e::spot ?
+            m_watchables[(int)exchange_name_e::kucoin].spots:
+          m_watchables[(int)exchange_name_e::kucoin].futures;
       auto iter =
-          std::find_if(kucoinFutures.cbegin(), kucoinFutures.cend(),
+          std::find_if(kucoinContainer.cbegin(), kucoinContainer.cend(),
                        [configuration](korrelator::token_t const &t) {
-                         return t.tradeType == trade_type_e::futures &&
+                         return configuration.tradeType == t.tradeType &&
                                 t.symbolName.compare(configuration.symbol,
                                                      Qt::CaseInsensitive) == 0;
                        });
-      if (iter != kucoinFutures.cend()) {
+      if (iter != kucoinContainer.cend()) {
         configuration.multiplier = iter->multiplier;
         configuration.tickSize = iter->tickSize;
         configuration.quoteMinSize = iter->quoteMinSize;
+        configuration.baseMinSize = iter->baseMinSize;
+        configuration.baseAssetPrecision = iter->baseAssetPrecision;
+        configuration.quotePrecision = iter->quotePrecision;
+        configuration.baseCurrency = iter->baseCurrency;
+        configuration.quoteCurrency = iter->quoteCurrency;
       }
     }
   }
@@ -1412,7 +1440,7 @@ void MainDialog::startWebsocket() {
     }
 
     for (auto &tokenInfo : m_tokens) {
-      if (tokenInfo.symbolName.size() != 1)
+      if (tokenInfo.symbolName.length() != 1)
         m_websocket->addSubscription(tokenInfo.symbolName, tokenInfo.tradeType,
                                      tokenInfo.exchange, tokenInfo.realPrice);
     }
@@ -1430,9 +1458,9 @@ void MainDialog::startWebsocket() {
   m_graphUpdater.worker = std::make_unique<korrelator::Worker>([this] {
     QMetaObject::invokeMethod(this, [this] {
       /* Set up and initialize the graph plotting timer */
+      korrelator::time.restart();
       QObject::connect(&m_timerPlot, &QTimer::timeout,
                        m_graphUpdater.worker.get(), [this] { onTimerTick(); });
-      korrelator::time.restart();
       korrelator::lastPoint = 0.0;
       auto const timerTick = getTimerTickMilliseconds();
       m_timerPlot.start(timerTick);
@@ -1524,7 +1552,6 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   using korrelator::trade_action_e;
 
   static char const *const legendDisplayFormat = "%1(%2)";
-
   double const keyStart =
       (key >= korrelator::maxVisiblePlot ? (key - korrelator::maxVisiblePlot)
                                          : 0.0);
@@ -1543,101 +1570,94 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   bool isResettingSymbols = false;
 
   // update the real symbols
-  for (int i = 1; i < m_tokens.size(); ++i) {
-    auto &value = m_tokens[i];
-
-    ++value.graphPointsDrawnCount;
-    if (value.prevNormalizedPrice == maxDoubleValue)
-      value.prevNormalizedPrice = value.normalizedPrice;
-
-    isResettingSymbols =
-        !m_findingSpecialRef && korrelator::restartTickValues[0].has_value() &&
-        (value.graphPointsDrawnCount >=
-         (qint64)*korrelator::restartTickValues[tick_line_type_e::normal]);
-
-    if (isResettingSymbols)
-      value.graphPointsDrawnCount = 0;
-
-    auto const crossOverDecision = lineCrossedOver(
-        prevRef, currentRef, value.prevNormalizedPrice, value.normalizedPrice);
-
-    if (crossOverDecision != trade_action_e::nothing) {
-      auto &crossOver = value.crossOver.emplace();
-      crossOver.signalPrice = value.realPrice;
-      crossOver.action = crossOverDecision;
-      crossOver.time =
-          QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-      value.crossedOver = true;
-    }
-
-    if (value.crossedOver) {
-      double amp = 0.0;
-      auto &crossOverValue = *value.crossOver;
-      if (crossOverValue.action == trade_action_e::buy)
-        amp = (value.normalizedPrice / currentRef) - 1.0;
-      else
-        amp = (currentRef / value.normalizedPrice) - 1.0;
-
-      if (m_findingUmbral && amp >= m_threshold) {
-        korrelator::model_data_t data;
-        data.marketType =
-            (value.tradeType == trade_type_e::spot ? "SPOT" : "FUTURES");
-        data.signalPrice = crossOverValue.signalPrice;
-        data.openPrice = value.realPrice;
-        data.symbol = value.symbolName;
-        data.openTime =
-            QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-        data.signalTime = crossOverValue.time;
-
-        emit newOrderDetected(std::move(crossOverValue), std::move(data),
-                              value.exchange, value.tradeType);
-        value.crossedOver = false;
-        value.crossOver.reset();
-      }
-    }
-
-    if (refResult.eachTickNormalize || m_doingManualReset) {
-      currentRef /= refSymbol.alpha;
-      auto const distanceFromRefToSymbol = // a
-          ((value.normalizedPrice > currentRef)
-               ? (value.normalizedPrice / currentRef)
-               : (currentRef / value.normalizedPrice)) -
-          1.0;
-      auto const distanceThreshold = m_specialRef; // b
-      bool const resettingRef =
-          m_doingManualReset && distanceFromRefToSymbol > m_resetPercentage;
-
-      if (refResult.eachTickNormalize || resettingRef) {
-        if (value.normalizedPrice > currentRef) {
-          refSymbol.alpha =
-              ((distanceFromRefToSymbol + 1.0) / (distanceThreshold + 1.0));
-        } else {
-          refSymbol.alpha =
-              ((distanceThreshold + 1.0) / (distanceFromRefToSymbol + 1.0));
-        }
-        if (resettingRef)
-          refResult.isResettingRef = true;
-      }
-    }
-
-    if (updatingMinMax) {
-      QCPRange const range(keyStart, key);
-      calculateGraphMinMax(value, range, refResult.minValue,
-                           refResult.maxValue);
-    }
-
+  auto &value = m_tokens[1];
+  ++value.graphPointsDrawnCount;
+  if (value.prevNormalizedPrice == maxDoubleValue)
     value.prevNormalizedPrice = value.normalizedPrice;
-    value.graph->setName(QString(legendDisplayFormat)
-                             .arg(value.legendName)
-                             .arg(value.graphPointsDrawnCount));
-    value.graph->addData(key, value.normalizedPrice);
-  } // end for
 
-  if (refResult.isResettingRef || isResettingSymbols) {
-    // qDebug() << "Ref:" << refSymbol.normalizedPrice
-    //         << "Normal:" << m_tokens[1].normalizedPrice;
-    resetTickerData(refResult.isResettingRef, isResettingSymbols);
+  isResettingSymbols =
+      !m_findingSpecialRef && korrelator::restartTickValues[0].has_value() &&
+      (value.graphPointsDrawnCount >=
+       (qint64)(*korrelator::restartTickValues[tick_line_type_e::normal]));
+
+  if (isResettingSymbols)
+    value.graphPointsDrawnCount = 0;
+
+  auto const crossOverDecision = lineCrossedOver(
+      prevRef, currentRef, value.prevNormalizedPrice, value.normalizedPrice);
+
+  if (crossOverDecision != trade_action_e::nothing) {
+    auto &crossOver = value.crossOver.emplace();
+    crossOver.signalPrice = value.realPrice;
+    crossOver.action = crossOverDecision;
+    crossOver.time =
+        QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+    value.crossedOver = true;
   }
+
+  if (value.crossedOver) {
+    double amp = 0.0;
+    auto &crossOverValue = *value.crossOver;
+    if (crossOverValue.action == trade_action_e::buy)
+      amp = (value.normalizedPrice / currentRef) - 1.0;
+    else
+      amp = (currentRef / value.normalizedPrice) - 1.0;
+
+    if (m_findingUmbral && amp >= m_threshold) {
+      korrelator::model_data_t data;
+      data.marketType =
+          (value.tradeType == trade_type_e::spot ? "SPOT" : "FUTURES");
+      data.signalPrice = crossOverValue.signalPrice;
+      data.openPrice = value.realPrice;
+      data.symbol = value.symbolName;
+      data.openTime =
+          QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+      data.signalTime = crossOverValue.time;
+
+      emit newOrderDetected(std::move(crossOverValue), std::move(data),
+                            value.exchange, value.tradeType);
+      value.crossedOver = false;
+      value.crossOver.reset();
+    }
+  }
+
+  if (refResult.eachTickNormalize || m_doingManualReset) {
+    currentRef /= refSymbol.alpha;
+    auto const distanceFromRefToSymbol = // a
+        ((value.normalizedPrice > currentRef)
+             ? (value.normalizedPrice / currentRef)
+             : (currentRef / value.normalizedPrice)) -
+        1.0;
+    auto const distanceThreshold = m_specialRef; // b
+    bool const resettingRef =
+        m_doingManualReset && distanceFromRefToSymbol > m_resetPercentage;
+
+    if (refResult.eachTickNormalize || resettingRef) {
+      if (value.normalizedPrice > currentRef) {
+        refSymbol.alpha =
+            ((distanceFromRefToSymbol + 1.0) / (distanceThreshold + 1.0));
+      } else {
+        refSymbol.alpha =
+            ((distanceThreshold + 1.0) / (distanceFromRefToSymbol + 1.0));
+      }
+      if (resettingRef)
+        refResult.isResettingRef = true;
+    }
+  }
+
+  if (updatingMinMax) {
+    QCPRange const range(keyStart, key);
+    calculateGraphMinMax(value, range, refResult.minValue, refResult.maxValue);
+  }
+
+  value.prevNormalizedPrice = value.normalizedPrice;
+  value.graph->setName(QString(legendDisplayFormat)
+                           .arg(value.legendName)
+                           .arg(value.graphPointsDrawnCount));
+  value.graph->addData(key, value.normalizedPrice);
+
+  if (refResult.isResettingRef || isResettingSymbols)
+    resetTickerData(refResult.isResettingRef, isResettingSymbols);
 
   if (updatingMinMax) {
     auto const diff = (refResult.maxValue - refResult.minValue) / 19.0;
@@ -1649,17 +1669,24 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
 
 void MainDialog::onTimerTick() {
   double const key = korrelator::time.elapsed() / 1'000.0;
+
   // update the min max on the y-axis every second
-  bool const updatingMinMax = (key - korrelator::lastPoint) > 1.0;
+  bool const updatingMinMax = (key - korrelator::lastPoint) >= 1.0;
   if (updatingMinMax)
     korrelator::lastPoint = key;
   calculatePriceNormalization();
   updateGraphData(key, updatingMinMax);
+  graph_keys.append(key);
+}
 
-  // make key axis range scroll right with the data at a constant range of 100
-  ui->customPlot->xAxis->setRange(key, korrelator::maxVisiblePlot,
-                                  Qt::AlignRight);
-  ui->customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
+void MainDialog::updatePlottingKey() {
+  while(true) {
+    auto const key = graph_keys.get();
+    // make key axis range scroll right with the data at a constant range of 100
+    ui->customPlot->xAxis->setRange(key, korrelator::maxVisiblePlot,
+                                    Qt::AlignRight);
+    ui->customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
+  }
 }
 
 void MainDialog::resetTickerData(const bool resetRefs,
@@ -1828,7 +1855,7 @@ void MainDialog::tradeExchangeTokens(
     korrelator::binance_https_plug *binanceConnector;
   };
 
-  auto& ioContext = korrelator::getExchangeIOContext();
+  auto &ioContext = korrelator::getExchangeIOContext();
   auto &sslContext = korrelator::getSSLContext();
   auto lastAction = trade_action_e::nothing;
   double lastQuantity = NAN;
@@ -1875,10 +1902,9 @@ void MainDialog::tradeExchangeTokens(
     auto const isKuCoin = data.exchange == exchange_name_e::kucoin;
     connector_t connector;
     if (isKuCoin) {
-      connector.kucoinConnector =
-          new korrelator::kucoin_https_plug(
-            ioContext, sslContext, data.tradeType,
-            data.apiInfo, data.tradeConfig);
+      connector.kucoinConnector = new korrelator::kucoin_https_plug(
+          ioContext, sslContext, data.tradeType, data.apiInfo,
+          data.tradeConfig);
       connector.kucoinConnector->setPrice(data.tokenPrice);
       connector.kucoinConnector->startConnect();
     } else if (data.exchange == exchange_name_e::binance) {

@@ -91,6 +91,7 @@ private:
   void onTimerTick();
   void onOKButtonClicked();
   void stopGraphPlotting();
+  void updatePlottingKey();
   void saveTokensToFile();
   void readTokensFromFile();
   void updateKuCoinTradeConfiguration();

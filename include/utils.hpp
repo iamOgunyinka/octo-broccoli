@@ -31,9 +31,10 @@ struct trade_config_data_t {
 
   double baseBalance = 0.0;
   double size = 0.0;
-  double multiplier = 0.0; // only for KuCoin
+  double multiplier = 1.0; // only for KuCoin
   double tickSize = 0.0; // only for KuCoin
   double quoteMinSize = 0.0;
+  double baseMinSize = 0.0;
   int leverage = 0;
   int8_t pricePrecision = -1;
   int8_t quantityPrecision = pricePrecision;

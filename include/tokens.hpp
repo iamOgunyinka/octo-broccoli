@@ -35,7 +35,7 @@ public:
   double alpha = 1.0;
   double normalizedPrice = 0.0;
   double realPrice = 0.0;
-  double multiplier = 0.0; // only used by kucoin
+  double multiplier = 1.0; // only used by kucoin
   double tickSize = 0.0; // used as the stepSize in Binance
   double baseMinSize = 0.0; // The minimum quantity requried to place an order
   double quoteMinSize = 0.0; // The minimum funds required to place a market order
