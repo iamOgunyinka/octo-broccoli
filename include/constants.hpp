@@ -19,7 +19,8 @@ static char const *const kc_futures_http_request;
 static char const * const root_dir;
 static char const * const encrypted_config_filename;
 static char const * const config_json_filename;
-static char const * const korrelator_json_filename;
+static char const * const app_json_filename;
+static char const * const old_json_filename;
 static char const * const trade_json_filename;
 
 static size_t const futures_http_request_len;

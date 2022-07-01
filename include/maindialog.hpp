@@ -43,8 +43,6 @@ struct ref_calculation_data_t {
   double maxValue = -minValue;
 };
 
-enum class ticker_reset_type_e { non_ref_symbols, ref_symbols, both };
-
 struct watchable_data_t {
   korrelator::token_list_t spots;
   korrelator::token_list_t futures;
@@ -89,11 +87,13 @@ private:
                     exchange_name_e const);
   void tokenRemoved(QString const &text);
   void onTimerTick();
+  void takeBackToFactoryReset();
   void onOKButtonClicked();
+  void onStartVerificationSuccessful();
   void stopGraphPlotting();
   void updatePlottingKey();
-  void saveTokensToFile();
-  void readTokensFromFile();
+  void saveAppConfigToFile();
+  void readAppConfigFromFile();
   void updateKuCoinTradeConfiguration();
   void readTradesConfigFromFile();
   void addNewItemToTokenMap(QString const &name, trade_type_e const,
@@ -106,6 +106,7 @@ private:
   void getInitialTokenPrices();
   void populateUIComponents();
   void connectAllUISignals();
+  void connectRestartTickSignal();
   bool validateUserInput();
   void generateJsonFile(korrelator::model_data_t const &);
   void onApplyButtonClicked();
@@ -161,6 +162,7 @@ private:
   bool m_findingSpecialRef = false;
   bool m_doingManualReset = false;
   bool m_programIsRunning = false;
+  bool m_firstRun = true;
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;
 };

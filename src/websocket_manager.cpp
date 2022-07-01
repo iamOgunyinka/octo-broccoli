@@ -54,6 +54,7 @@ void websocket_manager::addSubscription(QString const &tokenName,
                                         trade_type_e const tradeType,
                                         exchange_name_e const exchange,
                                         double &result) {
+  /*
   auto iter = m_checker.find(exchange);
   if (iter != m_checker.end()) {
     auto iter2 = std::find_if(
@@ -68,7 +69,7 @@ void websocket_manager::addSubscription(QString const &tokenName,
   } else {
     m_checker[exchange].push_back({tradeType, tokenName});
   }
-
+  */
   if (exchange == exchange_name_e::binance) {
     auto sock = new binance_ws(*m_ioContext, m_sslContext, result, tradeType);
     sock->addSubscription(tokenName.toLower());

@@ -144,7 +144,7 @@ void kucoin_futures_plug::createRequestData() {
   httpRequest.body() = payload;
   httpRequest.prepare_payload();
 
-#ifndef TESTNET
+#ifdef _DEBUG
   std::ostringstream ss;
   ss << httpRequest;
   qDebug() << ss.str().c_str();
@@ -304,6 +304,8 @@ void kucoin_futures_plug::initiateResendOrder() {
     m_errorString = "Maximum number of retries";
     return;
   }
+  // we need to recreate the request because of the timestamp that may
+  // have expired or nearing its expiration period.
   createRequestData();
 #ifdef _DEBUG
   {

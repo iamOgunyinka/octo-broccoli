@@ -39,6 +39,8 @@ static constexpr const double maxDoubleValue =
 
 double maxOrderRetries = 10.0;
 
+// QString globalStringSaver;
+
 namespace korrelator {
 
 static double maxVisiblePlot = 100.0;
@@ -117,15 +119,20 @@ void token_t::reset() {
   if (graph && graph->data())
     graph->data()->clear();
 
-  calculatingNewMinMax = true;
   crossedOver = false;
+  calculatingNewMinMax = true;
+  pricePrecision = quantityPrecision = baseAssetPrecision = quotePrecision = -1;
   minPrice = prevNormalizedPrice = maxDoubleValue;
   maxPrice = -maxDoubleValue;
   alpha = 1.0;
+  baseMinSize = 0.0;
+  quoteMinSize = 0.0;
   normalizedPrice = realPrice = 0.0;
-  multiplier = tickSize = 0.0;
+  multiplier = 1.0;
+  tickSize = 0.0;
   graphPointsDrawnCount = 0;
   graph = nullptr;
+  baseCurrency = quoteCurrency = legendName = "";
   crossOver.reset();
 }
 
@@ -160,8 +167,10 @@ MainDialog::MainDialog(QWidget *parent)
   registerCustomTypes();
   populateUIComponents();
   connectAllUISignals();
-  readTokensFromFile();
+
+  readAppConfigFromFile();
   readTradesConfigFromFile();
+
   m_apiTradeApiMap = SettingsDialog::getApiDataMap();
   if (m_apiTradeApiMap.empty()) {
     QMessageBox::information(this, "Information",
@@ -170,7 +179,7 @@ MainDialog::MainDialog(QWidget *parent)
   }
 
   std::thread{[this] { tradeExchangeTokens(this, m_model); }}.detach();
-  std::thread{[this] { updatePlottingKey(); } }.detach();
+  std::thread{[this] { updatePlottingKey(); }}.detach();
 
   QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
     getSpotsTokens(exchange_name_e::kucoin);
@@ -182,13 +191,69 @@ MainDialog::MainDialog(QWidget *parent)
 #endif
 }
 
+void MainDialog::connectRestartTickSignal() {
+  QObject::connect(
+        ui->restartTickCombo,
+        static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+        this, [this](int const index) {
+    using korrelator::tick_line_type_e;
+    ui->specialLine->setText("");
+    ui->restartTickLine->setText("");
+    ui->resetPercentageLine->setText("");
+
+    auto &optionalValue = korrelator::restartTickValues[index];
+    if (optionalValue) {
+      if (index == tick_line_type_e::special &&
+          *optionalValue != maxDoubleValue) {
+        ui->specialLine->setText(QString::number(m_specialRef));
+        ui->restartTickLine->setText(QString::number(*optionalValue));
+
+        if (maxDoubleValue != m_resetPercentage) {
+          ui->resetPercentageLine->setText(
+                QString::number(m_resetPercentage));
+        }
+      }
+      if (index != tick_line_type_e::special)
+        ui->restartTickLine->setText(
+              QString::number(optionalValue.value()));
+    } else
+      ui->restartTickLine->clear();
+    ui->restartTickLine->setFocus();
+  });
+}
+
 MainDialog::~MainDialog() {
   stopGraphPlotting();
   resetGraphComponents();
   m_websocket.reset();
-  saveTokensToFile();
+  saveAppConfigToFile();
 
   delete ui;
+}
+
+void MainDialog::takeBackToFactoryReset() {
+  enableUIComponents(false);
+  ui->startButton->setEnabled(false);
+
+  for (auto &token : m_tokens)
+    token.reset();
+
+  for (auto &token : m_refs)
+    token.reset();
+
+  readTradesConfigFromFile();
+  for (auto const &exchange :
+       {exchange_name_e::binance, exchange_name_e::kucoin}) {
+    m_watchables[(int)exchange].futures.clear();
+    m_watchables[(int)exchange].spots.clear();
+    getSpotsTokens(exchange);
+    getFuturesTokens(exchange);
+  }
+
+  QTimer::singleShot(std::chrono::seconds(7), this, [this] {
+    ui->startButton->setEnabled(true);
+    onStartVerificationSuccessful();
+  });
 }
 
 void MainDialog::registerCustomTypes() {
@@ -203,9 +268,8 @@ void MainDialog::populateUIComponents() {
   korrelator::restartTickValues.clear();
   auto const totalRestartTicks = ui->restartTickCombo->count();
   for (int i = 0; i < totalRestartTicks; ++i) {
-    if (i == totalRestartTicks - 1) {
+    if (i == totalRestartTicks - 1)
       korrelator::restartTickValues.push_back(maxDoubleValue);
-    }
     korrelator::restartTickValues.push_back(2'500);
   }
 
@@ -239,8 +303,25 @@ void MainDialog::onApplyButtonClicked() {
   if (isnan(value))
     return;
 
-  if (value == maxDoubleValue)
+  if (value == maxDoubleValue) {
+    if (ui->specialLine->text().trimmed().isEmpty() &&
+        ui->restartTickLine->text().trimmed().isEmpty() &&
+        ui->resetPercentageLine->text().trimmed().isEmpty()) {
+      if (index == tick_line_type_e::all) {
+        korrelator::restartTickValues[tick_line_type_e::all].reset();
+        korrelator::restartTickValues[tick_line_type_e::normal].reset();
+        korrelator::restartTickValues[tick_line_type_e::ref].reset();
+      } else if (index == tick_line_type_e::special) {
+        korrelator::restartTickValues[tick_line_type_e::special].reset();
+        m_resetPercentage = maxDoubleValue;
+        m_specialRef = maxDoubleValue;
+        m_doingManualReset = false;
+      } else {
+        korrelator::restartTickValues[index].reset();
+      }
+    }
     return ui->restartTickLine->setFocus();
+  }
 
   if (index == tick_line_type_e::all) {
     korrelator::restartTickValues[tick_line_type_e::normal].emplace(value);
@@ -269,34 +350,7 @@ void MainDialog::onApplyButtonClicked() {
 }
 
 void MainDialog::connectAllUISignals() {
-  QObject::connect(
-      ui->restartTickCombo,
-      static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-      this, [this](int const index) {
-        using korrelator::tick_line_type_e;
-        ui->specialLine->setText("");
-        ui->restartTickLine->setText("");
-        ui->resetPercentageLine->setText("");
-
-        auto &optionalValue = korrelator::restartTickValues[index];
-        if (optionalValue) {
-          if (index == tick_line_type_e::special &&
-              *optionalValue != maxDoubleValue) {
-            ui->specialLine->setText(QString::number(m_specialRef));
-            ui->restartTickLine->setText(QString::number(*optionalValue));
-
-            if (maxDoubleValue != m_resetPercentage) {
-              ui->resetPercentageLine->setText(
-                  QString::number(m_resetPercentage));
-            }
-          }
-          if (index != tick_line_type_e::special)
-            ui->restartTickLine->setText(
-                QString::number(optionalValue.value()));
-        } else
-          ui->restartTickLine->clear();
-        ui->restartTickLine->setFocus();
-      });
+  connectRestartTickSignal();
 
   QObject::connect(
       ui->exchangeCombo,
@@ -344,7 +398,7 @@ void MainDialog::connectAllUISignals() {
     auto const exchange =
         static_cast<exchange_name_e>(ui->exchangeCombo->currentIndex());
     addNewItemToTokenMap(tokenName, trade_type_e::spot, exchange);
-    saveTokensToFile();
+    saveAppConfigToFile();
   });
 
   QObject::connect(ui->spotPrevButton, &QToolButton::clicked, this, [this] {
@@ -354,7 +408,7 @@ void MainDialog::connectAllUISignals() {
     auto item = ui->tokenListWidget->takeItem(currentRow);
     tokenRemoved(item->text());
     delete item;
-    saveTokensToFile();
+    saveAppConfigToFile();
   });
 
   QObject::connect(ui->startButton, &QPushButton::clicked, this,
@@ -370,7 +424,7 @@ void MainDialog::connectAllUISignals() {
     auto const exchange =
         static_cast<exchange_name_e>(ui->exchangeCombo->currentIndex());
     addNewItemToTokenMap(tokenName, trade_type_e::futures, exchange);
-    saveTokensToFile();
+    saveAppConfigToFile();
   });
   QObject::connect(ui->applyUmbralButton, &QPushButton::clicked, this, [this] {
     m_threshold = getIntegralValue(ui->umbralLine);
@@ -453,6 +507,8 @@ void MainDialog::stopGraphPlotting() {
   m_priceUpdater.thread.reset();
 
   m_programIsRunning = false;
+  m_firstRun = false;
+  m_lastTradeAction = korrelator::trade_action_e::nothing;
   enableUIComponents(true);
 
   // for (auto &token : m_tokens)
@@ -722,16 +778,21 @@ void MainDialog::getKuCoinExchangeInfo(trade_type_e const tradeType) {
                                             symbol, Qt::CaseInsensitive) == 0;
                                });
       if (iter != container.end()) {
-        iter->baseMinSize = itemObject.value("baseMinSize").toString().toDouble();
-        iter->quoteMinSize = itemObject.value("quoteMinSize").toString().toDouble();
+        iter->baseMinSize =
+            itemObject.value("baseMinSize").toString().toDouble();
+        iter->quoteMinSize =
+            itemObject.value("quoteMinSize").toString().toDouble();
         iter->quoteCurrency = itemObject.value("quoteCurrency").toString();
         iter->baseCurrency = itemObject.value("baseCurrency").toString();
 
         auto const baseIncrement = itemObject.value("baseIncrement").toString();
-        if (auto const pointIndex = baseIncrement.indexOf('.'); pointIndex != -1)
+        if (auto const pointIndex = baseIncrement.indexOf('.');
+            pointIndex != -1)
           iter->baseAssetPrecision = baseIncrement.length() - (pointIndex + 1);
-        auto const quoteIncrement = itemObject.value("quoteIncrement").toString();
-        if (auto const pointIndex = quoteIncrement.indexOf('.'); pointIndex != -1)
+        auto const quoteIncrement =
+            itemObject.value("quoteIncrement").toString();
+        if (auto const pointIndex = quoteIncrement.indexOf('.');
+            pointIndex != -1)
           iter->quotePrecision = quoteIncrement.length() - (pointIndex + 1);
       }
     }
@@ -834,15 +895,63 @@ void MainDialog::getExchangeInfo(exchange_name_e const exchange,
                    &QNetworkReply::deleteLater);
 }
 
-void MainDialog::saveTokensToFile() {
+void MainDialog::saveAppConfigToFile() {
+  using korrelator::tick_line_type_e;
+
   if (ui->tokenListWidget->count() == 0)
     return;
 
-  QFile file{korrelator::constants::korrelator_json_filename};
+  QFile file{korrelator::constants::app_json_filename};
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
     return;
 
-  QJsonArray jsonList;
+  QJsonObject rootObject;
+  rootObject["umbral"] = ui->umbralLine->text().trimmed().toDouble();
+  rootObject["graphThickness"] = ui->graphThicknessCombo->currentText().toInt();
+  rootObject["maxRetries"] = ui->maxRetriesLine->text().trimmed().toInt();
+  rootObject["reverse"] = ui->reverseCheckBox->isChecked();
+
+  {
+    QJsonArray jsonRestartTicks;
+    auto &specialValue =
+        korrelator::restartTickValues[tick_line_type_e::special];
+    bool const findingSpecialRef =
+        specialValue.has_value() && specialValue.value() != maxDoubleValue;
+
+    if (findingSpecialRef) {
+      QJsonObject obj;
+      obj["name"] = "Special";
+      obj["reduceTo"] = QString::number(m_specialRef);
+      obj["reduceFrom"] = QString::number(m_resetPercentage);
+      obj["maxReach"] = QString::number(specialValue.value());
+
+      jsonRestartTicks.append(obj);
+    } else {
+
+      if (auto const normalLine = korrelator::restartTickValues[tick_line_type_e::normal];
+          normalLine.has_value())
+      {
+        QJsonObject obj;
+        obj["name"] = "normalLine";
+        obj["maxReach"] = QString::number(normalLine.value());
+        jsonRestartTicks.append(obj);
+      }
+
+      if (auto const refLine = korrelator::restartTickValues[tick_line_type_e::ref];
+          refLine.has_value())
+      {
+        QJsonObject obj;
+        obj["name"] = "refLine";
+        obj["maxReach"] = QString::number(refLine.value());
+        jsonRestartTicks.append(obj);
+      }
+    }
+
+    if (!jsonRestartTicks.isEmpty())
+      rootObject["restartTicks"] = jsonRestartTicks;
+  }
+
+  QJsonArray tokensJsonList;
   for (int i = 0; i < ui->tokenListWidget->count(); ++i) {
     QListWidgetItem *item = ui->tokenListWidget->item(i);
     QJsonObject obj;
@@ -852,9 +961,10 @@ void MainDialog::saveTokensToFile() {
     obj["market"] = d.tradeType == trade_type_e::spot ? "spot" : "futures";
     obj["ref"] = displayedName.endsWith('*');
     obj["exchange"] = korrelator::exchangeNameToString(d.exchange);
-    jsonList.append(obj);
+    tokensJsonList.append(obj);
   }
-  file.write(QJsonDocument(jsonList).toJson());
+  rootObject["tokens"] = tokensJsonList;
+  file.write(QJsonDocument(rootObject).toJson());
 }
 
 void MainDialog::updateTradeConfigurationPrecisions() {
@@ -886,32 +996,77 @@ void MainDialog::updateTradeConfigurationPrecisions() {
   }
 }
 
-void MainDialog::readTokensFromFile() {
+void MainDialog::readAppConfigFromFile() {
   using korrelator::constants;
+  using korrelator::tick_line_type_e;
 
-  QJsonArray jsonList;
+  QJsonArray tokenJsonList;
+
   {
-    if (QFileInfo::exists("brocolli.json"))
-      QFile::rename("brocolli.json", "korrelator.json");
-
     QDir().mkpath(constants::root_dir);
-    if (QFile file("korrelator.json"); file.exists()) {
-      if (file.copy("korrelator.json", constants::korrelator_json_filename))
-        file.remove("korrelator.json");
-    }
+    if (QFileInfo::exists(constants::old_json_filename))
+      QFile::rename(constants::old_json_filename, constants::app_json_filename);
 
-    QFile file{constants::korrelator_json_filename};
+    QFile file{constants::app_json_filename};
     if (!file.open(QIODevice::ReadOnly))
       return;
-    jsonList = QJsonDocument::fromJson(file.readAll()).array();
+
+    auto const jsonRootValue = QJsonDocument::fromJson(file.readAll());
+    if (jsonRootValue.isArray())
+      tokenJsonList = jsonRootValue.array();
+    else {
+      auto const jsonObject = jsonRootValue.object();
+
+      auto const umbral = jsonObject.value("umbral").toDouble();
+      ui->umbralLine->setText(QString::number(umbral));
+
+      auto const graphThickness =
+          std::clamp(jsonObject.value("graphThickness").toInt(), 1, 5);
+      ui->graphThicknessCombo->setCurrentIndex(graphThickness - 1);
+
+      maxOrderRetries =
+          std::clamp(jsonObject.value("maxRetries").toInt(), 1, 10);
+      ui->maxRetriesLine->setText(QString::number(maxOrderRetries));
+
+      auto const reverse = jsonObject.value("reverse").toBool(false);
+      ui->reverseCheckBox->setChecked(reverse);
+
+      auto const restartTicks = jsonObject.value("restartTicks").toArray();
+      ui->restartTickCombo->disconnect(this);
+
+      for (int i = 0; i < restartTicks.size(); ++i) {
+        QJsonObject const tickData = restartTicks[i].toObject();
+        auto const fieldName = tickData.value("name").toString();
+        auto const reduceTo = tickData.value("reduceTo").toString();
+        auto const reduceFrom = tickData.value("reduceFrom").toString();
+        auto const maxReach = tickData.value("maxReach").toString();
+
+        ui->resetPercentageLine->setText(reduceFrom);
+        ui->specialLine->setText(reduceTo);
+        ui->restartTickLine->setText(maxReach);
+
+        if (fieldName.compare("special", Qt::CaseInsensitive) == 0) {
+          ui->restartTickCombo->setCurrentIndex(tick_line_type_e::special);
+        } else if (fieldName.compare("refLine", Qt::CaseInsensitive) == 0) {
+          ui->restartTickCombo->setCurrentIndex(tick_line_type_e::ref);
+        } else {
+          ui->restartTickCombo->setCurrentIndex(tick_line_type_e::normal);
+        }
+        onApplyButtonClicked();
+      }
+
+      tokenJsonList = jsonObject.value("tokens").toArray();
+    }
   }
 
-  if (jsonList.isEmpty())
+  connectRestartTickSignal();
+
+  if (tokenJsonList.isEmpty())
     return;
 
   auto const refPreValue = ui->refCheckBox->isChecked();
-  for (int i = 0; i < jsonList.size(); ++i) {
-    QJsonObject const obj = jsonList[i].toObject();
+  for (int i = 0; i < tokenJsonList.size(); ++i) {
+    QJsonObject const obj = tokenJsonList[i].toObject();
     auto const tokenName = obj["symbol"].toString().toUpper();
     auto const tradeType = obj["market"].toString().toLower() == "spot"
                                ? trade_type_e::spot
@@ -1290,8 +1445,8 @@ void MainDialog::getInitialTokenPrices() {
 }
 
 double MainDialog::getIntegralValue(QLineEdit *lineEdit) {
-  if (auto const resetTickerStr = lineEdit->text().trimmed();
-      !resetTickerStr.isEmpty()) {
+  auto const resetTickerStr = lineEdit->text().trimmed();
+  if (!resetTickerStr.isEmpty()) {
     bool isOK = true;
     double const restartNumber = resetTickerStr.toDouble(&isOK);
     if (restartNumber < 0.0 || !isOK) {
@@ -1354,16 +1509,7 @@ void MainDialog::setupOrderTableModel() {
   ui->tableView->resizeRowsToContents();
 }
 
-void MainDialog::onOKButtonClicked() {
-  if (ui->tokenListWidget->count() == 0)
-    return;
-
-  if (m_programIsRunning)
-    return stopGraphPlotting();
-
-  if (!validateUserInput())
-    return;
-
+void MainDialog::onStartVerificationSuccessful() {
   m_programIsRunning = true;
   m_lastTradeAction = korrelator::trade_action_e::nothing;
   korrelator::maxVisiblePlot = getMaxPlotsInVisibleRegion();
@@ -1385,17 +1531,32 @@ void MainDialog::onOKButtonClicked() {
   getInitialTokenPrices();
 }
 
-void MainDialog::calculatePriceNormalization() {
-  if (m_tokens.size() == 2 && m_hasReferences) {
-    korrelator::updateTokenIter(m_tokens[1]);
-  } else {
-    size_t const tokenStartIndex = m_hasReferences ? 1 : 0;
-    for (size_t i = tokenStartIndex; i < m_tokens.size(); ++i)
-      korrelator::updateTokenIter(m_tokens[i]);
-  }
+void MainDialog::onOKButtonClicked() {
+  if (ui->tokenListWidget->count() == 0)
+    return;
 
+  if (m_programIsRunning)
+    return stopGraphPlotting();
+
+  if (!validateUserInput())
+    return;
+
+  if (!m_firstRun)
+    return takeBackToFactoryReset();
+
+  onStartVerificationSuccessful();
+}
+
+void MainDialog::calculatePriceNormalization() {
   for (auto &token : m_refs)
     korrelator::updateTokenIter(token);
+
+  if (m_hasReferences && m_tokens.size() == 2)
+    return korrelator::updateTokenIter(m_tokens[1]);
+
+  size_t const tokenStartIndex = m_hasReferences ? 1 : 0;
+  for (size_t i = tokenStartIndex; i < m_tokens.size(); ++i)
+    korrelator::updateTokenIter(m_tokens[i]);
 }
 
 void MainDialog::updateKuCoinTradeConfiguration() {
@@ -1405,9 +1566,10 @@ void MainDialog::updateKuCoinTradeConfiguration() {
       auto &configuration = m_tradeConfigDataList[x];
       if (configuration.exchange != exchange_name_e::kucoin)
         continue;
-      auto &kucoinContainer = configuration.tradeType == trade_type_e::spot ?
-            m_watchables[(int)exchange_name_e::kucoin].spots:
-          m_watchables[(int)exchange_name_e::kucoin].futures;
+      auto &kucoinContainer =
+          configuration.tradeType == trade_type_e::spot
+              ? m_watchables[(int)exchange_name_e::kucoin].spots
+              : m_watchables[(int)exchange_name_e::kucoin].futures;
       auto iter =
           std::find_if(kucoinContainer.cbegin(), kucoinContainer.cend(),
                        [configuration](korrelator::token_t const &t) {
@@ -1674,15 +1836,18 @@ void MainDialog::onTimerTick() {
   bool const updatingMinMax = (key - korrelator::lastPoint) >= 1.0;
   if (updatingMinMax)
     korrelator::lastPoint = key;
+
   calculatePriceNormalization();
   updateGraphData(key, updatingMinMax);
+
   graph_keys.append(key);
 }
 
 void MainDialog::updatePlottingKey() {
-  while(true) {
+  while (true) {
     auto const key = graph_keys.get();
-    // make key axis range scroll right with the data at a constant range of 100
+    // make `key` axis range scroll right with the data at a
+    // constant range of `maxVisiblePlot`, set by the user
     ui->customPlot->xAxis->setRange(key, korrelator::maxVisiblePlot,
                                     Qt::AlignRight);
     ui->customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
@@ -1696,12 +1861,9 @@ void MainDialog::resetTickerData(const bool resetRefs,
       value.calculatingNewMinMax = true;
   };
 
-  if (resetRefs && resetSymbols) {
+  if (resetRefs)
     resetMap(m_refs);
-    return resetMap(m_tokens);
-  } else if (resetRefs)
-    resetMap(m_refs);
-  else
+  if (resetSymbols)
     resetMap(m_tokens);
 }
 
@@ -1794,8 +1956,11 @@ void MainDialog::sendExchangeRequest(
     tradeConfigPtrs.push_back(&m_tradeConfigDataList.back());
   }
 
-  if (tradeConfigPtrs.size() != 2) {
-    modelDataPtr->remark = "Internal software error";
+  if (tradeConfigPtrs.size() > 2) {
+    modelDataPtr->remark = "You have configurations for " +
+                           tradeConfigPtrs[0]->symbol +
+                           " that exceeds BUY and SELL."
+                           " Please check for duplicates.";
     return;
   }
 

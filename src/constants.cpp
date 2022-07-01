@@ -5,8 +5,8 @@ namespace korrelator {
 
 #ifdef TESTNET
 char const * const constants::root_dir = "testnet_config";
-char const * const constants::korrelator_json_filename =
-    "testnet_config/korrelator.json";
+char const * const constants::app_json_filename =
+    "testnet_config/app.json";
 char const * const constants::trade_json_filename =
     "testnet_config/trade.json";
 char const * const constants::encrypted_config_filename = "testnet_config/.config.dat";
@@ -32,7 +32,9 @@ char const *const constants::kc_spot_http_request =
 char const * const constants::root_dir = "config";
 char const * const constants::trade_json_filename =
     "./config/trade.json";
-char const * const constants::korrelator_json_filename =
+char const * const constants::app_json_filename =
+    "./config/app.json";
+char const * const constants::old_json_filename =
     "./config/korrelator.json";
 char const * const constants::encrypted_config_filename = "config/.config.dat";
 char const * const constants::config_json_filename = "config/config.json";
