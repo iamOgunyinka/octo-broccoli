@@ -24,6 +24,8 @@ QMAKE_CXXFLAGS += -bigobj
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
+  binance_symbols.cpp \
+  kucoin_symbols.cpp \
   src/binance_futures_plug.cpp \
   src/binance_https_request.cpp \
   src/binance_spots_plug.cpp \
@@ -42,6 +44,7 @@ SOURCES += main.cpp \
   src/websocket_manager.cpp
 
 HEADERS += \
+  binance_symbols.hpp \
   include/binance_futures_plug.hpp \
   include/binance_https_request.hpp \
   include/binance_spots_plug.hpp \
@@ -61,7 +64,8 @@ HEADERS += \
   include/utils.hpp \
   include/tokens.hpp \
   include/websocket_manager.hpp \
-  include/settingsdialog.hpp
+  include/settingsdialog.hpp \
+  kucoin_symbols.hpp
 
 FORMS += \
     ui/settingsdialog.ui \

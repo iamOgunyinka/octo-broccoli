@@ -48,6 +48,15 @@ struct watchable_data_t {
   korrelator::token_list_t futures;
 };
 
+class binance_symbols;
+class kucoin_symbols;
+
+struct symbol_fetcher_t {
+  std::unique_ptr<binance_symbols> binance = nullptr;
+  std::unique_ptr<kucoin_symbols> kucoin = nullptr;
+  ~symbol_fetcher_t();
+};
+
 } // namespace korrelator
 
 using korrelator::exchange_name_e;
@@ -78,11 +87,8 @@ private:
   void onSettingsDialogClicked();
   void registerCustomTypes();
   void getExchangeInfo(exchange_name_e const, trade_type_e const);
-  void getKuCoinExchangeInfo(trade_type_e const);
   void getSpotsTokens(exchange_name_e const, callback_t = nullptr);
   void getFuturesTokens(exchange_name_e const, callback_t = nullptr);
-  void sendNetworkRequest(QUrl const &url, callback_t, trade_type_e const,
-                          exchange_name_e const);
   void newItemAdded(QString const &token, trade_type_e const,
                     exchange_name_e const);
   void tokenRemoved(QString const &text);
@@ -141,11 +147,9 @@ private:
 
 private:
   Ui::MainDialog *ui;
-
   QNetworkAccessManager m_networkManager;
   std::unique_ptr<korrelator::websocket_manager> m_websocket = nullptr;
   std::unique_ptr<korrelator::order_model> m_model = nullptr;
-
   QMap<int, korrelator::watchable_data_t> m_watchables;
   SettingsDialog::api_data_map_t m_apiTradeApiMap;
   korrelator::token_list_t m_tokens;
@@ -153,6 +157,7 @@ private:
   std::vector<korrelator::trade_config_data_t> m_tradeConfigDataList;
   korrelator::graph_updater_t m_graphUpdater;
   korrelator::price_updater_t m_priceUpdater;
+  korrelator::symbol_fetcher_t m_symbolUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout = nullptr;
   QTimer m_timerPlot;
   korrelator::trade_action_e m_lastTradeAction;

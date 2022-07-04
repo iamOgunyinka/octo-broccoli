@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 #include <vector>
+#include <functional>
 
 class QCPGraph;
 class QCPLayoutGrid;
@@ -69,4 +70,7 @@ struct token_compare_t {
 
 using token_list_t = std::vector<token_t>;
 using token_map_t = std::map<QString, token_t>;
+using success_callback_t = std::function<void(korrelator::token_list_t &&, exchange_name_e)>;
+using error_callback_t = std::function<void(QString const &)>;
+
 } // namespace korrelator
