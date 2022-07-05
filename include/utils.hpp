@@ -6,7 +6,7 @@
 namespace korrelator {
 
 enum class trade_type_e { spot, futures, unknown };
-enum class exchange_name_e { binance/*, ftx*/, kucoin, none };
+enum class exchange_name_e { binance, ftx, kucoin, none };
 enum class trade_action_e { buy, sell, nothing };
 enum class market_type_e { market, limit, unknown };
 enum tick_line_type_e { normal, ref, all, special };

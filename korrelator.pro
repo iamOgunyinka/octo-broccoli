@@ -24,16 +24,18 @@ QMAKE_CXXFLAGS += -bigobj
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
-  binance_symbols.cpp \
-  kucoin_symbols.cpp \
+  src/binance_symbols.cpp \
+  src/ftx_symbols.cpp \
+  src/ftx_websocket.cpp \
+  src/kucoin_symbols.cpp \
   src/binance_futures_plug.cpp \
   src/binance_https_request.cpp \
   src/binance_spots_plug.cpp \
   src/constants.cpp \
   src/crypto.cpp \
   src/kucoin_futures_plug.cpp \
-  src/kucoin_https_request.cpp \
   src/kucoin_spots_plug.cpp \
+  src/kucoin_https_request.cpp \
   src/kucoin_websocket.cpp \
   src/settingsdialog.cpp \
   src/binance_websocket.cpp \
@@ -44,7 +46,8 @@ SOURCES += main.cpp \
   src/websocket_manager.cpp
 
 HEADERS += \
-  binance_symbols.hpp \
+  include/binance_symbols.hpp \
+  include/ftx_symbols.hpp \
   include/binance_futures_plug.hpp \
   include/binance_https_request.hpp \
   include/binance_spots_plug.hpp \
@@ -52,6 +55,7 @@ HEADERS += \
   include/constants.hpp \
   include/container.hpp \
   include/crypto.hpp \
+  include/ftx_websocket.hpp \
   include/kucoin_futures_plug.hpp \
   include/kucoin_https_request.hpp \
   include/kucoin_spots_plug.hpp \
@@ -65,7 +69,7 @@ HEADERS += \
   include/tokens.hpp \
   include/websocket_manager.hpp \
   include/settingsdialog.hpp \
-  kucoin_symbols.hpp
+  include/kucoin_symbols.hpp
 
 FORMS += \
     ui/settingsdialog.ui \

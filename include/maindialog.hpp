@@ -50,10 +50,12 @@ struct watchable_data_t {
 
 class binance_symbols;
 class kucoin_symbols;
+class ftx_symbols;
 
 struct symbol_fetcher_t {
   std::unique_ptr<binance_symbols> binance = nullptr;
   std::unique_ptr<kucoin_symbols> kucoin = nullptr;
+  std::unique_ptr<ftx_symbols> ftx = nullptr;
   ~symbol_fetcher_t();
 };
 
