@@ -25,6 +25,9 @@ QMAKE_CXXFLAGS += -bigobj
 
 SOURCES += main.cpp \
   src/binance_symbols.cpp \
+  src/ftx_futures_plug.cpp \
+  src/ftx_https_request.cpp \
+  src/ftx_spots_plug.cpp \
   src/ftx_symbols.cpp \
   src/ftx_websocket.cpp \
   src/kucoin_symbols.cpp \
@@ -47,6 +50,9 @@ SOURCES += main.cpp \
 
 HEADERS += \
   include/binance_symbols.hpp \
+  include/ftx_futures_plug.hpp \
+  include/ftx_https_request.hpp \
+  include/ftx_spots_plug.hpp \
   include/ftx_symbols.hpp \
   include/binance_futures_plug.hpp \
   include/binance_https_request.hpp \

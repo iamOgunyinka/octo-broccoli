@@ -11,12 +11,10 @@
 
 namespace korrelator {
 ftx_websocket::ftx_websocket(net::io_context &ioContext,
-                             net::ssl::context &sslContext,
-                             double &priceResult, trade_type_e const tt)
+                             net::ssl::context &sslContext, double &priceResult,
+                             trade_type_e const tt)
     : m_ioContext(ioContext), m_sslContext(sslContext),
-      m_priceResult(priceResult), m_isSpot(tt == trade_type_e::spot)
-{
-}
+      m_priceResult(priceResult), m_isSpot(tt == trade_type_e::spot) {}
 
 ftx_websocket::~ftx_websocket() { m_webStream.reset(); }
 
@@ -43,16 +41,15 @@ void ftx_websocket::websockConnectToResolvedNames(
   m_webStream.emplace(m_ioContext, m_sslContext);
   beast::get_lowest_layer(*m_webStream).expires_after(std::chrono::seconds(30));
   beast::get_lowest_layer(*m_webStream)
-      .async_connect(
-          resolvedNames,
-          [this](auto const &errorCode,
-                 resolver_result_type::endpoint_type const &) {
-            if (errorCode) {
-              qDebug() << errorCode.message().c_str();
-              return;
-            }
-            websockPerformSslHandshake();
-          });
+      .async_connect(resolvedNames,
+                     [this](auto const &errorCode,
+                            resolver_result_type::endpoint_type const &) {
+                       if (errorCode) {
+                         qDebug() << errorCode.message().c_str();
+                         return;
+                       }
+                       websockPerformSslHandshake();
+                     });
 }
 
 void ftx_websocket::websockPerformSslHandshake() {
@@ -105,27 +102,27 @@ void ftx_websocket::performWebsocketHandshake() {
 void ftx_websocket::waitForMessages() {
   m_readBuffer.emplace();
   m_webStream->async_read(
-        *m_readBuffer,
-        [this](beast::error_code const error_code,
-        std::size_t const) {
-    if (error_code == net::error::operation_aborted) {
-      qDebug() << error_code.message().c_str();
-      return;
-    } else if (error_code) {
-      qDebug() << error_code.message().c_str();
-      m_webStream.reset();
-      return startFetching();
-    }
-    interpretGenericMessages();
-  });
+      *m_readBuffer,
+      [this](beast::error_code const error_code, std::size_t const) {
+        if (error_code == net::error::operation_aborted) {
+          qDebug() << error_code.message().c_str();
+          return;
+        } else if (error_code) {
+          qDebug() << error_code.message().c_str();
+          m_webStream.reset();
+          return startFetching();
+        }
+        interpretGenericMessages();
+      });
 }
 
 void ftx_websocket::interpretGenericMessages() {
-  switch(m_step){
+  switch (m_step) {
   case step_e::unsubscribed:
     return performSubscriptionToChannel();
   case step_e::subscribed:
-    return readSubscriptionResponse();
+    m_step = step_e::ticker_data;
+    return waitForMessages();
   case step_e::ticker_data:
   default:
     return readTickerResponse();
@@ -152,24 +149,13 @@ void ftx_websocket::readTickerResponse() {
       m_priceResult = (dataObject.FindMember("last")->value.GetDouble());
     } else {
       m_priceResult = (dataObject.FindMember("ask")->value.GetDouble() +
-                       dataObject.FindMember("bid")->value.GetDouble() ) / 2.0;
+                       dataObject.FindMember("bid")->value.GetDouble()) /
+                      2.0;
     }
-    qDebug() << m_priceResult;
-  } catch(...) {
-
+  } catch (...) {
   }
 
   waitForMessages();
-}
-
-void ftx_websocket::readSubscriptionResponse() {
-  char const *bufferCstr =
-      static_cast<char const *>(m_readBuffer->cdata().data());
-
-  qDebug() << bufferCstr;
-
-  m_step = step_e::ticker_data;
-  return waitForMessages();
 }
 
 void ftx_websocket::performSubscriptionToChannel() {
@@ -190,19 +176,16 @@ void ftx_websocket::performSubscriptionToChannel() {
   m_writerBuffer = s.GetString();
 
   qDebug() << m_writerBuffer.c_str();
-  m_webStream->async_write(
-        net::buffer(m_writerBuffer),
-        [this](auto const errorCode, size_t const)
-  {
-    if (errorCode) {
-      qDebug() << errorCode.message().c_str();
-      return;
-    }
-    m_writerBuffer.clear();
-    m_step = step_e::subscribed;
-    waitForMessages();
-  });
+  m_webStream->async_write(net::buffer(m_writerBuffer),
+                           [this](auto const errorCode, size_t const) {
+                             if (errorCode) {
+                               qDebug() << errorCode.message().c_str();
+                               return;
+                             }
+                             m_writerBuffer.clear();
+                             m_step = step_e::subscribed;
+                             waitForMessages();
+                           });
 }
-
 
 } // namespace korrelator

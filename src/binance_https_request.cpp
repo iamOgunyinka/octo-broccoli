@@ -12,7 +12,7 @@ double format_quantity(double const value, int decimal_places) {
   return std::trunc(value * multiplier) / multiplier;
 }
 
-binance_https_plug::binance_https_plug(net::io_context &ioContext,
+binance_trader::binance_trader(net::io_context &ioContext,
                                        ssl::context &sslContext,
                                        trade_type_e const tradeType,
                                        api_data_t const &apiData,
@@ -27,36 +27,36 @@ binance_https_plug::binance_https_plug(net::io_context &ioContext,
   }
 }
 
-void binance_https_plug::setLeverage() {
+void binance_trader::setLeverage() {
   if (m_tradeType == trade_type_e::futures)
     m_binancePlug.futures->setLeverage();
 }
 
-void binance_https_plug::setPrice(double const price) {
+void binance_trader::setPrice(double const price) {
   if (m_tradeType == trade_type_e::futures)
     return m_binancePlug.futures->setPrice(price);
   m_binancePlug.spot->setPrice(price);
 }
 
-void binance_https_plug::startConnect() {
+void binance_trader::startConnect() {
   if (m_tradeType == trade_type_e::futures)
     return m_binancePlug.futures->startConnect();
   m_binancePlug.spot->startConnect();
 }
 
-double binance_https_plug::averagePrice() const {
+double binance_trader::averagePrice() const {
   if (m_tradeType == trade_type_e::futures)
     return m_binancePlug.futures->averagePrice();
   return m_binancePlug.spot->averagePrice();
 }
 
-QString binance_https_plug::errorString() const {
+QString binance_trader::errorString() const {
   if (m_tradeType == trade_type_e::futures)
     return m_binancePlug.futures->errorString();
   return m_binancePlug.spot->errorString();
 }
 
-binance_https_plug::~binance_https_plug() {
+binance_trader::~binance_trader() {
   if (m_tradeType == trade_type_e::futures)
     delete m_binancePlug.futures;
   else

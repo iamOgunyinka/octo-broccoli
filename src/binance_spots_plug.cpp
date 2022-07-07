@@ -121,8 +121,8 @@ bool binance_spots_plug::createRequestData() {
     }
   } else {
     query += ("&timeInForce=GTC"); // Good Till Canceled
-    if (size == 0.0 && m_tradeConfig->quoteAmount != 0.0)
-      size = m_tradeConfig->quoteAmount / m_price;
+    if (size == 0.0 && quoteAmount != 0.0)
+      size = quoteAmount / m_price;
 
     size = format_quantity(size, m_tradeConfig->quantityPrecision);
     query += ("&quantity=");

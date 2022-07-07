@@ -99,19 +99,18 @@ void kucoin_ws::restApiConnectToResolvedNames(
   beast::get_lowest_layer(*m_sslWebStream)
       .async_connect(resolvedNames,
                      [this](auto const errorCode,
-                            resolver::results_type::endpoint_type const &ep) {
+                            resolver::results_type::endpoint_type const &) {
                        if (errorCode) {
                          qDebug() << errorCode.message().c_str();
                          return;
                        }
-                       restApiPerformSSLHandshake(ep.port());
+                       restApiPerformSSLHandshake();
                      });
 }
 
-void kucoin_ws::restApiPerformSSLHandshake(int const) {
+void kucoin_ws::restApiPerformSSLHandshake() {
   std::string const url = (m_isSpotTrade ? constants::kucoin_https_spot_host
                                          : constants::kc_futures_api_host);
-      // + std::string(":") + std::to_string(port);
 
   beast::get_lowest_layer(*m_sslWebStream)
       .expires_after(std::chrono::seconds(15));
@@ -221,12 +220,8 @@ void kucoin_ws::restApiInterpretHttpResponse() {
 
   m_response.reset();
 
-  if (!m_instanceServers.empty() && !m_websocketToken.empty()) {
-    /*for (auto const &serverInstance: m_instanceServers)
-      qDebug() << serverInstance.endpoint.c_str()
-               << m_websocketToken.c_str(); */
+  if (!m_instanceServers.empty() && !m_websocketToken.empty())
     initiateWebsocketConnection();
-  }
 }
 
 void kucoin_ws::addSubscription(QString const &tokenName) {
@@ -317,24 +312,6 @@ void kucoin_ws::negotiateWebsocketConnection() {
 }
 
 void kucoin_ws::performWebsocketHandshake() {
-  /*
-  auto const &instanceData = m_instanceServers.back();
-  auto opt = ws::stream_base::timeout();
-  opt.idle_timeout = std::chrono::milliseconds(instanceData.pingTimeoutMs);
-  opt.handshake_timeout =
-      std::chrono::milliseconds(instanceData.pingIntervalMs);
-  opt.keep_alive_pings = true;
-  m_sslWebStream->set_option(opt);
-
-  m_sslWebStream->control_callback(
-      [this](beast::websocket::frame_type const frameType,
-             boost::string_view const &) {
-        if (frameType == ws::frame_type::close) {
-          m_sslWebStream.reset();
-          return restApiInitiateConnection();
-        }
-      });
-  */
   auto const path = m_uri.path() + "?token=" + m_websocketToken +
                     "&connectId=" + get_random_string(10);
   m_sslWebStream->async_handshake(m_uri.host(), path,

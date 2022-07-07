@@ -15,6 +15,7 @@
 #include "binance_symbols.hpp"
 #include "constants.hpp"
 #include "container.hpp"
+#include "ftx_https_request.hpp"
 #include "ftx_symbols.hpp"
 #include "kucoin_https_request.hpp"
 #include "kucoin_symbols.hpp"
@@ -133,7 +134,7 @@ struct plug_data_t {
   double tickSize = 0.0;
 };
 
-symbol_fetcher_t::~symbol_fetcher_t(){
+symbol_fetcher_t::~symbol_fetcher_t() {
   binance.reset();
   kucoin.reset();
 }
@@ -148,8 +149,10 @@ MainDialog::MainDialog(QWidget *parent)
 
   ui->setupUi(this);
 
-  m_symbolUpdater.binance.reset(new korrelator::binance_symbols(m_networkManager));
-  m_symbolUpdater.kucoin.reset(new korrelator::kucoin_symbols(m_networkManager));
+  m_symbolUpdater.binance.reset(
+      new korrelator::binance_symbols(m_networkManager));
+  m_symbolUpdater.kucoin.reset(
+      new korrelator::kucoin_symbols(m_networkManager));
   m_symbolUpdater.ftx.reset(new korrelator::ftx_symbols(m_networkManager));
 
   setWindowIcon(qApp->style()->standardPixmap(QStyle::SP_DesktopIcon));
@@ -177,8 +180,8 @@ MainDialog::MainDialog(QWidget *parent)
   std::thread{[this] { updatePlottingKey(); }}.detach();
 
   QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
-    for (auto const &exchange: {exchange_name_e::ftx,
-         exchange_name_e::kucoin}) {
+    for (auto const &exchange :
+         {exchange_name_e::ftx, exchange_name_e::kucoin}) {
       getSpotsTokens(exchange);
       getFuturesTokens(exchange);
     }
@@ -191,33 +194,33 @@ MainDialog::MainDialog(QWidget *parent)
 
 void MainDialog::connectRestartTickSignal() {
   QObject::connect(
-        ui->restartTickCombo,
-        static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-        this, [this](int const index) {
-    using korrelator::tick_line_type_e;
-    ui->specialLine->setText("");
-    ui->restartTickLine->setText("");
-    ui->resetPercentageLine->setText("");
+      ui->restartTickCombo,
+      static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+      this, [this](int const index) {
+        using korrelator::tick_line_type_e;
+        ui->specialLine->setText("");
+        ui->restartTickLine->setText("");
+        ui->resetPercentageLine->setText("");
 
-    auto &optionalValue = korrelator::restartTickValues[index];
-    if (optionalValue) {
-      if (index == tick_line_type_e::special &&
-          *optionalValue != maxDoubleValue) {
-        ui->specialLine->setText(QString::number(m_specialRef));
-        ui->restartTickLine->setText(QString::number(*optionalValue));
+        auto &optionalValue = korrelator::restartTickValues[index];
+        if (optionalValue) {
+          if (index == tick_line_type_e::special &&
+              *optionalValue != maxDoubleValue) {
+            ui->specialLine->setText(QString::number(m_specialRef));
+            ui->restartTickLine->setText(QString::number(*optionalValue));
 
-        if (maxDoubleValue != m_resetPercentage) {
-          ui->resetPercentageLine->setText(
-                QString::number(m_resetPercentage));
-        }
-      }
-      if (index != tick_line_type_e::special)
-        ui->restartTickLine->setText(
-              QString::number(optionalValue.value()));
-    } else
-      ui->restartTickLine->clear();
-    ui->restartTickLine->setFocus();
-  });
+            if (maxDoubleValue != m_resetPercentage) {
+              ui->resetPercentageLine->setText(
+                  QString::number(m_resetPercentage));
+            }
+          }
+          if (index != tick_line_type_e::special)
+            ui->restartTickLine->setText(
+                QString::number(optionalValue.value()));
+        } else
+          ui->restartTickLine->clear();
+        ui->restartTickLine->setFocus();
+      });
 }
 
 MainDialog::~MainDialog() {
@@ -241,11 +244,8 @@ void MainDialog::takeBackToFactoryReset() {
 
   readTradesConfigFromFile();
 
-  std::vector<exchange_name_e> const exchanges {
-    exchange_name_e::binance,
-        exchange_name_e::kucoin,
-        exchange_name_e::ftx
-  };
+  std::vector<exchange_name_e> const exchanges{
+      exchange_name_e::binance, exchange_name_e::kucoin, exchange_name_e::ftx};
   for (auto const &exchange : exchanges) {
     m_watchables[(int)exchange].futures.clear();
     m_watchables[(int)exchange].spots.clear();
@@ -670,7 +670,7 @@ void MainDialog::tokenRemoved(QString const &text) {
 
 void MainDialog::getSpotsTokens(korrelator::exchange_name_e const exchange,
                                 callback_t cb) {
-  auto errorCallback = [this](QString const & errorMessage) {
+  auto errorCallback = [this](QString const &errorMessage) {
     QMessageBox::critical(this, "Error", errorMessage);
   };
 
@@ -719,7 +719,7 @@ void MainDialog::getSpotsTokens(korrelator::exchange_name_e const exchange,
 
 void MainDialog::getFuturesTokens(korrelator::exchange_name_e const exchange,
                                   callback_t cb) {
-  auto errorCallback = [this](QString const & errorMessage) {
+  auto errorCallback = [this](QString const &errorMessage) {
     QMessageBox::critical(this, "Error", errorMessage);
   };
 
@@ -770,15 +770,15 @@ void MainDialog::getFuturesTokens(korrelator::exchange_name_e const exchange,
 void MainDialog::getExchangeInfo(exchange_name_e const exchange,
                                  trade_type_e const tradeType) {
 
-  auto errorCallback = [this](QString const & errorMessage) {
+  auto errorCallback = [this](QString const &errorMessage) {
     QMessageBox::critical(this, "Error", errorMessage);
   };
 
-  auto& container = m_watchables[(int)exchange];
+  auto &container = m_watchables[(int)exchange];
   if (exchange == exchange_name_e::binance) {
     auto successCallback = [this, &container, tradeType] {
-      auto & tokenList = tradeType == trade_type_e::futures ?
-            container.futures : container.spots;
+      auto &tokenList = tradeType == trade_type_e::futures ? container.futures
+                                                           : container.spots;
       auto combo =
           trade_type_e::futures == tradeType ? ui->futuresCombo : ui->spotCombo;
       combo->clear();
@@ -788,26 +788,26 @@ void MainDialog::getExchangeInfo(exchange_name_e const exchange,
 
     if (tradeType == trade_type_e::spot) {
       return m_symbolUpdater.binance->getSpotsExchangeInfo(
-            &container.spots, successCallback, errorCallback);
+          &container.spots, successCallback, errorCallback);
     } else {
       return m_symbolUpdater.binance->getFuturesExchangeInfo(
-            &container.futures, successCallback, errorCallback);
+          &container.futures, successCallback, errorCallback);
     }
   } else if (exchange == exchange_name_e::kucoin) {
     if (tradeType == trade_type_e::spot) {
-      return m_symbolUpdater.kucoin->getSpotsExchangeInfo(
-            &container.spots, errorCallback);
+      return m_symbolUpdater.kucoin->getSpotsExchangeInfo(&container.spots,
+                                                          errorCallback);
     } else {
-      return m_symbolUpdater.kucoin->getFuturesExchangeInfo(
-            &container.futures, errorCallback);
+      return m_symbolUpdater.kucoin->getFuturesExchangeInfo(&container.futures,
+                                                            errorCallback);
     }
   } else if (exchange == exchange_name_e::ftx) {
     if (tradeType == trade_type_e::spot) {
-      return m_symbolUpdater.ftx->getSpotsExchangeInfo(
-            &container.spots, errorCallback);
+      return m_symbolUpdater.ftx->getSpotsExchangeInfo(&container.spots,
+                                                       errorCallback);
     } else {
-      return m_symbolUpdater.ftx->getFuturesExchangeInfo(
-            &container.spots, errorCallback);
+      return m_symbolUpdater.ftx->getFuturesExchangeInfo(&container.spots,
+                                                         errorCallback);
     }
   }
 }
@@ -845,18 +845,18 @@ void MainDialog::saveAppConfigToFile() {
       jsonRestartTicks.append(obj);
     } else {
 
-      if (auto const normalLine = korrelator::restartTickValues[tick_line_type_e::normal];
-          normalLine.has_value())
-      {
+      if (auto const normalLine =
+              korrelator::restartTickValues[tick_line_type_e::normal];
+          normalLine.has_value()) {
         QJsonObject obj;
         obj["name"] = "normalLine";
         obj["maxReach"] = QString::number(normalLine.value());
         jsonRestartTicks.append(obj);
       }
 
-      if (auto const refLine = korrelator::restartTickValues[tick_line_type_e::ref];
-          refLine.has_value())
-      {
+      if (auto const refLine =
+              korrelator::restartTickValues[tick_line_type_e::ref];
+          refLine.has_value()) {
         QJsonObject obj;
         obj["name"] = "refLine";
         obj["maxReach"] = QString::number(refLine.value());
@@ -889,7 +889,7 @@ void MainDialog::updateTradeConfigurationPrecisions() {
     return;
 
   for (auto &tradeConfig : m_tradeConfigDataList) {
-    if (tradeConfig.exchange != exchange_name_e::binance)
+    if (tradeConfig.exchange == exchange_name_e::kucoin)
       continue;
     auto const &tokens = tradeConfig.tradeType == trade_type_e::futures
                              ? m_watchables[(int)tradeConfig.exchange].futures
@@ -1079,12 +1079,6 @@ void MainDialog::readTradesConfigFromFile() {
                                     .arg(key, data.symbol, side));
           continue;
         }
-      } else if (data.marketType == korrelator::market_type_e::limit) {
-        /*if (data.size == 0.0 && data.baseAmount == 0.0) {
-          QMessageBox::critical(this, "Error",
-                                tr("You need to specify the size and the
-        balance" " for %1/%2/%3") .arg(key, data.symbol, side)); continue;
-        }*/
       }
 
       if (data.tradeType == trade_type_e::futures)
@@ -1815,53 +1809,55 @@ void MainDialog::sendExchangeRequest(
   data.tickSize = tradeConfigPtr->tickSize;
   bool const isFutures = tradeType == trade_type_e::futures;
 
-  if (exchange == exchange_name_e::binance) {
-    if (!isFutures && !apiInfo.spotApiKey.isEmpty())
+  if ((!isFutures && !apiInfo.spotApiKey.isEmpty()) ||
+      (isFutures && !apiInfo.futuresApiKey.isEmpty())) {
+    switch (exchange) {
+    case exchange_name_e::binance:
+    case exchange_name_e::ftx:
+    case exchange_name_e::kucoin:
       return token_plugs.append(std::move(data));
-    else if (isFutures && !apiInfo.futuresApiKey.isEmpty())
-      return token_plugs.append(std::move(data));
-  } else if (exchange == exchange_name_e::kucoin) {
-    if (!isFutures && !apiInfo.spotApiKey.isEmpty())
-      return token_plugs.append(std::move(data));
-    else if (isFutures && !apiInfo.futuresApiKey.isEmpty())
-      return token_plugs.append(std::move(data));
+    default:
+      break;
+    }
   }
-
   modelDataPtr->remark = "Internal program error";
 }
 
 void MainDialog::tradeExchangeTokens(
     MainDialog *mainDialog, std::unique_ptr<korrelator::order_model> &model) {
+  using korrelator::binance_trader;
+  using korrelator::kucoin_trader;
+  using korrelator::ftx_trader;
   using korrelator::trade_action_e;
   using korrelator::trade_type_e;
-  using korrelator::kucoin_https_plug;
-  using korrelator::binance_https_plug;
 
+// todo: house ftx_*_plugs into a single class like binance
   union connector_t {
-    kucoin_https_plug *kucoinConnector;
-    binance_https_plug *binanceConnector;
+    kucoin_trader *kucoinTrader;
+    binance_trader *binanceTrader;
+    ftx_trader *ftxTrader;
   };
 
   auto &ioContext = korrelator::getExchangeIOContext();
   auto &sslContext = korrelator::getSSLContext();
   auto lastAction = trade_action_e::nothing;
   double lastQuantity = NAN;
-  bool binanceLeverageIsSet = false;
+  bool futuresLeverageIsSet = false;
   bool isFirstTrade = true;
   korrelator::model_data_t *modelData = nullptr;
 
   while (true) {
-    auto data = token_plugs.get();
+    auto tradeMetadata = token_plugs.get();
     modelData = nullptr;
 
     if (model)
       modelData = model->front();
 
     // only when program is stopped
-    if (data.tradeType == trade_type_e::unknown) {
+    if (tradeMetadata.tradeType == trade_type_e::unknown) {
       token_plugs.clear();
       lastQuantity = NAN;
-      binanceLeverageIsSet = false;
+      futuresLeverageIsSet = false;
       isFirstTrade = true;
       lastAction = trade_action_e::nothing;
       ioContext.stop();
@@ -1871,8 +1867,8 @@ void MainDialog::tradeExchangeTokens(
 
     if (isFirstTrade) {
       isFirstTrade = false;
-      if (data.tradeType == trade_type_e::spot &&
-          data.tradeConfig->side == trade_action_e::sell) {
+      if (tradeMetadata.tradeType == trade_type_e::spot &&
+          tradeMetadata.tradeConfig->side == trade_action_e::sell) {
         if (modelData)
           modelData->remark = "[Order Ignored] First spot trade cannot be "
                               "a SELL";
@@ -1882,77 +1878,79 @@ void MainDialog::tradeExchangeTokens(
     }
 
     if (lastAction != trade_action_e::nothing &&
-        data.tradeType == trade_type_e::futures) {
-      data.tradeConfig->size = lastQuantity;
+        tradeMetadata.tradeType == trade_type_e::futures) {
+      tradeMetadata.tradeConfig->size = lastQuantity;
     }
 
-    auto const isKuCoin = data.exchange == exchange_name_e::kucoin;
+    auto const isKuCoin = tradeMetadata.exchange == exchange_name_e::kucoin;
     connector_t connector;
+    auto const tradeType = tradeMetadata.tradeType;
     if (isKuCoin) {
-      connector.kucoinConnector = new korrelator::kucoin_https_plug(
-          ioContext, sslContext, data.tradeType, data.apiInfo,
-          data.tradeConfig);
-      connector.kucoinConnector->setPrice(data.tokenPrice);
-      connector.kucoinConnector->startConnect();
-    } else if (data.exchange == exchange_name_e::binance) {
-      /*connector.binanceConnector = nullptr;
-      auto tradeConfig = data.tradeConfig;
-      if (tradeConfig->size < tradeConfig->multiplier &&
-          tradeConfig->size != 0.0) {
-        if (modelData) {
-          modelData->remark =
-              QString("[Ignored] The amount of %1 available(%2) is lesser than"
-                      " the minimum expected (%3)")
-              .arg(tradeConfig->quoteCurrency).arg(tradeConfig->quoteAmount)
-              .arg(tradeConfig->multiplier);
-        }
-        mainDialog->refreshModel();
-        continue;
+      connector.kucoinTrader = new kucoin_trader(
+          ioContext, sslContext, tradeType, tradeMetadata.apiInfo,
+          tradeMetadata.tradeConfig);
+      connector.kucoinTrader->setPrice(tradeMetadata.tokenPrice);
+      connector.kucoinTrader->startConnect();
+    } else if (tradeMetadata.exchange == exchange_name_e::binance) {
+      connector.binanceTrader = new binance_trader(
+          ioContext, sslContext, tradeType, tradeMetadata.apiInfo,
+          tradeMetadata.tradeConfig);
+      if (!futuresLeverageIsSet && tradeType == trade_type_e::futures) {
+        futuresLeverageIsSet = true;
+        connector.binanceTrader->setLeverage();
       }
-      */
-      connector.binanceConnector = new korrelator::binance_https_plug(
-          ioContext, sslContext, data.tradeType, data.apiInfo,
-          data.tradeConfig);
-      if (!binanceLeverageIsSet && data.tradeType == trade_type_e::futures) {
-        binanceLeverageIsSet = true;
-        connector.binanceConnector->setLeverage();
+      connector.binanceTrader->setPrice(tradeMetadata.tokenPrice);
+      connector.binanceTrader->startConnect();
+    } else if (tradeMetadata.exchange == exchange_name_e::ftx) {
+      connector.ftxTrader = new ftx_trader(
+            ioContext, sslContext, tradeType,
+            tradeMetadata.apiInfo, tradeMetadata.tradeConfig);
+      if (!futuresLeverageIsSet && trade_type_e::futures == tradeType) {
+        futuresLeverageIsSet = true;
+        connector.ftxTrader->setAccountLeverage();
       }
-      connector.binanceConnector->setPrice(data.tokenPrice);
-      connector.binanceConnector->startConnect();
+
+      connector.ftxTrader->setPrice(tradeMetadata.tokenPrice);
+      connector.ftxTrader->startConnect();
     }
 
     ioContext.run();
 
-    if (data.tradeType == trade_type_e::futures &&
+    if (tradeMetadata.tradeType == trade_type_e::futures &&
         lastAction == trade_action_e::nothing)
-      lastQuantity = data.tradeConfig->size * 2.0;
-    lastAction = data.tradeConfig->side;
+      lastQuantity = tradeMetadata.tradeConfig->size * 2.0;
+    lastAction = tradeMetadata.tradeConfig->side;
 
     double price = 0.0;
     QString errorString;
 
     if (isKuCoin) {
-      auto &kcRequest = *connector.kucoinConnector;
+      auto &kcRequest = *connector.kucoinTrader;
       auto const quantityPurchased = kcRequest.quantityPurchased();
       auto const sizePurchased = kcRequest.sizePurchased();
       if (quantityPurchased != 0.0 && sizePurchased != 0.0) {
-        price =
-            (quantityPurchased / sizePurchased) / data.tradeConfig->multiplier;
+        price = (quantityPurchased / sizePurchased) /
+                tradeMetadata.tradeConfig->multiplier;
       }
       errorString = kcRequest.errorString();
-      delete connector.kucoinConnector;
-    } else if (data.exchange == exchange_name_e::binance) {
-      auto &binanceRequest = *connector.binanceConnector;
+      delete connector.kucoinTrader;
+    } else if (tradeMetadata.exchange == exchange_name_e::binance) {
+      auto &binanceRequest = *connector.binanceTrader;
       price = binanceRequest.averagePrice();
       errorString = binanceRequest.errorString();
-      delete connector.binanceConnector;
+      delete connector.binanceTrader;
+    } else if (tradeMetadata.exchange == exchange_name_e::ftx) {
+      price = connector.ftxTrader->getAveragePrice();
+      errorString = connector.ftxTrader->errorString();
+      delete connector.ftxTrader;
+      connector.ftxTrader = nullptr;
     }
 
     if (modelData)
       modelData->exchangePrice = price;
 
     if (!errorString.isEmpty()) {
-      if (data.tradeType == trade_type_e::futures) {
+      if (tradeMetadata.tradeType == trade_type_e::futures) {
         lastAction = trade_action_e::nothing;
         lastQuantity /= 2.0;
       }

@@ -55,7 +55,7 @@ private:
   void restApiReceiveResponse();
   void restApiInitiateConnection();
   void restApiConnectToResolvedNames(results_type const &);
-  void restApiPerformSSLHandshake(int const port);
+  void restApiPerformSSLHandshake();
   void restApiInterpretHttpResponse();
 
   void negotiateWebsocketConnection();

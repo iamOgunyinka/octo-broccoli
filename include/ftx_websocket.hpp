@@ -63,7 +63,6 @@ private:
   step_e m_step;
 
 private:
-  void readSubscriptionResponse();
   void readTickerResponse();
   void performSubscriptionToChannel();
   void waitForMessages();

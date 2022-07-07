@@ -22,17 +22,17 @@ class binance_futures_plug;
 }
 
 
-class binance_https_plug {
+class binance_trader {
   trade_type_e m_tradeType;
   union {
     details::binance_spots_plug* spot;
     details::binance_futures_plug* futures;
   } m_binancePlug;
 public:
-  binance_https_plug(net::io_context &, ssl::context &,
+  binance_trader(net::io_context &, ssl::context &,
                      trade_type_e const tradeType, api_data_t const &apiData,
                      trade_config_data_t *tradeConfig);
-  ~binance_https_plug();
+  ~binance_trader();
   void setLeverage();
   void setPrice(double const price);
   double averagePrice() const;

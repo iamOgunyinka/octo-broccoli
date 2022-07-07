@@ -8,8 +8,8 @@ namespace ssl {
 class context;
 }
 class io_context;
-}
-}
+} // namespace asio
+} // namespace boost
 
 namespace net = boost::asio;
 namespace ssl = net::ssl;
@@ -17,31 +17,29 @@ namespace ssl = net::ssl;
 namespace korrelator {
 
 namespace details {
-class kucoin_spots_plug;
-class kucoin_futures_plug;
-}
+class ftx_spots_plug;
+class ftx_futures_plug;
+} // namespace details
 
-class kucoin_trader {
+class ftx_trader {
   trade_type_e const m_tradeType;
   union {
-    details::kucoin_futures_plug* futures;
-    details::kucoin_spots_plug* spot;
+    details::ftx_futures_plug *futures;
+    details::ftx_spots_plug *spot;
   } m_exchangePlug;
 
 public:
-  kucoin_trader(net::io_context &, ssl::context &,
-                    trade_type_e const tradeType,
-                    api_data_t const &apiData, trade_config_data_t *);
+  ftx_trader(net::io_context &, ssl::context &, trade_type_e const tradeType,
+             api_data_t const &apiData, trade_config_data_t *);
 
-  ~kucoin_trader();
+  ~ftx_trader();
   void setPrice(double const price);
   void startConnect();
+  void setAccountLeverage();
 
-  double quantityPurchased() const;
-  double sizePurchased() const;
+  double getAveragePrice() const;
   QString errorString() const;
 };
 
 double format_quantity(double const value, int decimal_places);
-}
-
+} // namespace korrelator
