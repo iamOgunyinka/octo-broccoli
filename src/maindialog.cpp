@@ -306,7 +306,7 @@ void MainDialog::onApplyButtonClicked() {
   if (isnan(value))
     return;
 
-  if (value == maxDoubleValue) {
+  if (value == maxDoubleValue || value == 0) {
     if (ui->specialLine->text().trimmed().isEmpty() &&
         ui->restartTickLine->text().trimmed().isEmpty() &&
         ui->resetPercentageLine->text().trimmed().isEmpty()) {

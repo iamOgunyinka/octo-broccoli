@@ -110,35 +110,16 @@ bool ftx_futures_plug::createNewOrderRequestData() {
     writer.Key("price");
     writer.Null();
 
-    if (quoteAmount != 0.0) {
+    writer.Key("size");
+    if (size == 0.0 && quoteAmount != 0.0) {
       if (!normalizeQuoteAmount(m_tradeConfig)) {
         m_errorString = "Available amount is lesser than the minimum";
         return false;
       }
 
-      auto const newSize =
-          format_quantity(quoteAmount / m_price, m_tradeConfig->quotePrecision);
-      writer.Key("size");
-      writer.Double(newSize);
-    } else if (size != 0.0) { // usually in the case of a SELL
-      size += m_tradeConfig->baseBalance;
-      m_tradeConfig->baseBalance = 0.0;
-      auto const tickSize =
-          m_tradeConfig->tickSize == 0.0 ? 1.0 : m_tradeConfig->tickSize;
-      double const newTempSize =
-          static_cast<double>(int(size / tickSize)) * tickSize;
-
-      if ((newTempSize * m_price) < m_tradeConfig->quoteMinSize) {
-        m_errorString = "MIN_NOTIONAL";
-        return false;
-      }
-
-      if (newTempSize < size)
-        m_tradeConfig->baseBalance = size - newTempSize;
-      size = format_quantity(newTempSize, m_tradeConfig->quantityPrecision);
-      writer.Key("size");
-      writer.Double(size);
+      size = format_quantity(quoteAmount / m_price, m_tradeConfig->quotePrecision);
     }
+    writer.Double(size);
   } else {
     writer.String("limit");
     if (size == 0.0 && quoteAmount != 0.0)
@@ -194,7 +175,6 @@ bool ftx_futures_plug::createRequestData() {
 
   if (m_requestStatus == request_status_e::setting_leverage)
     return createLeverageRequestData();
-
   return createNewOrderRequestData();
 }
 
@@ -331,12 +311,14 @@ void ftx_futures_plug::processOrderResponse(char const *str,
         totalSize += itemObject.FindMember("size")->value.GetDouble();
         totalPrice += price;
       }
+      m_tradeConfig->quoteAmount = 0.0;
       if (m_tradeConfig->size == 0.0)
         m_tradeConfig->size = totalSize;
       m_averagePrice = totalPrice / (double)resultList.Size();
     }
   } catch (...) {
     qDebug() << "Error parsing JSONResponse:" << str;
+    return createErrorResponse();
   }
   disconnectConnection();
 }

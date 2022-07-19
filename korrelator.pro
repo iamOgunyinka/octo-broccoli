@@ -30,26 +30,25 @@ SOURCES += main.cpp \
   src/ftx_spots_plug.cpp \
   src/ftx_symbols.cpp \
   src/ftx_websocket.cpp \
-  src/kucoin_symbols.cpp \
   src/binance_futures_plug.cpp \
-  src/binance_https_request.cpp \
   src/binance_spots_plug.cpp \
+  src/binance_https_request.cpp \
+  src/binance_websocket.cpp \
   src/constants.cpp \
   src/crypto.cpp \
   src/kucoin_futures_plug.cpp \
   src/kucoin_spots_plug.cpp \
   src/kucoin_https_request.cpp \
+  src/kucoin_symbols.cpp \
   src/kucoin_websocket.cpp \
   src/settingsdialog.cpp \
-  src/binance_websocket.cpp \
   src/maindialog.cpp \
   src/order_model.cpp \
   src/qcustomplot.cpp \
   src/uri.cpp \
   src/websocket_manager.cpp
 
-HEADERS += \
-  include/binance_symbols.hpp \
+HEADERS += include/binance_symbols.hpp \
   include/ftx_futures_plug.hpp \
   include/ftx_https_request.hpp \
   include/ftx_spots_plug.hpp \
@@ -77,11 +76,10 @@ HEADERS += \
   include/settingsdialog.hpp \
   include/kucoin_symbols.hpp
 
-FORMS += \
-    ui/settingsdialog.ui \
+FORMS += ui/settingsdialog.ui \
     ui/maindialog.ui
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
-else: unix:!android: target.path = /opt/$${TARGET}/bin
+elsD: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
