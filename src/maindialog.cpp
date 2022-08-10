@@ -3,6 +3,7 @@
 #include "maindialog.hpp"
 #include "ui_maindialog.h"
 
+#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -30,9 +31,8 @@ double maxOrderRetries = 10.0;
 namespace korrelator {
 
 static double maxVisiblePlot = 100.0;
-static QTime time(QTime::currentTime());
+static QElapsedTimer time{};
 static double lastPoint = 0.0;
-static std::vector<std::optional<double>> restartTickValues{};
 
 QString actionTypeToString(trade_action_e a) {
   if (a == trade_action_e::buy)
@@ -134,6 +134,10 @@ struct plug_data_t {
   double tickSize = 0.0;
 };
 
+symbol_fetcher_t::symbol_fetcher_t():
+    binance{nullptr}, kucoin{nullptr}, ftx{nullptr}
+{
+}
 symbol_fetcher_t::~symbol_fetcher_t() {
   binance.reset();
   kucoin.reset();
@@ -145,7 +149,9 @@ static korrelator::waitable_container_t<korrelator::plug_data_t> token_plugs{};
 static korrelator::waitable_container_t<double> graph_keys{};
 
 MainDialog::MainDialog(QWidget *parent)
-    : QDialog(parent), ui(new Ui::MainDialog) {
+    : QDialog(parent), ui(new Ui::MainDialog), m_websocket(nullptr),
+    m_legendLayout(nullptr)
+{
 
   ui->setupUi(this);
 
@@ -193,32 +199,41 @@ MainDialog::MainDialog(QWidget *parent)
 }
 
 void MainDialog::connectRestartTickSignal() {
+  auto getValue = [this](int const index) ->std::optional<korrelator::rot_metadata_t> {
+    if (index == 0)
+      return m_restartTickValues.normalLines;
+    else if (index == 1)
+      return m_restartTickValues.refLines;
+    else if (index == 3)
+      return m_restartTickValues.special;
+    return std::nullopt; // should almost never happen
+  };
+
+  auto displayValuesInGUI = [this](std::optional<korrelator::rot_metadata_t> const &rotMetadata) {
+    if (!rotMetadata.has_value())
+      return;
+    if (rotMetadata->restartOnTickEntry != 0.0)
+      ui->restartTickLine->setText(QString::number(rotMetadata->restartOnTickEntry));
+
+    if (auto const value = rotMetadata->percentageEntry; value != 0.0)
+      ui->resetPercentageLine->setText(QString::number(value));
+
+    if (auto const value = rotMetadata->specialEntry; value != 0.0)
+      ui->specialLine->setText(QString::number(value));
+  };
+
   QObject::connect(
       ui->restartTickCombo,
       static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-      this, [this](int const index) {
+      this, [this, displayValuesInGUI, getValue](int const index) {
         using korrelator::tick_line_type_e;
         ui->specialLine->setText("");
         ui->restartTickLine->setText("");
         ui->resetPercentageLine->setText("");
 
-        auto &optionalValue = korrelator::restartTickValues[index];
-        if (optionalValue) {
-          if (index == tick_line_type_e::special &&
-              *optionalValue != maxDoubleValue) {
-            ui->specialLine->setText(QString::number(m_specialRef));
-            ui->restartTickLine->setText(QString::number(*optionalValue));
-
-            if (maxDoubleValue != m_resetPercentage) {
-              ui->resetPercentageLine->setText(
-                  QString::number(m_resetPercentage));
-            }
-          }
-          if (index != tick_line_type_e::special)
-            ui->restartTickLine->setText(
-                QString::number(optionalValue.value()));
-        } else
-          ui->restartTickLine->clear();
+        if (index == 2)
+          return;
+        displayValuesInGUI(getValue(index));
         ui->restartTickLine->setFocus();
       });
 }
@@ -268,13 +283,9 @@ void MainDialog::registerCustomTypes() {
 }
 
 void MainDialog::populateUIComponents() {
-  korrelator::restartTickValues.clear();
-  auto const totalRestartTicks = ui->restartTickCombo->count();
-  for (int i = 0; i < totalRestartTicks; ++i) {
-    if (i == totalRestartTicks - 1)
-      korrelator::restartTickValues.push_back(maxDoubleValue);
-    korrelator::restartTickValues.push_back(2'500);
-  }
+  // value initialize normal and refLine's `restartOnTickEntry` data to 2500
+  m_restartTickValues.normalLines.emplace().restartOnTickEntry = 2500;
+  m_restartTickValues.refLines.emplace().restartOnTickEntry = 2500;
 
   ui->resetPercentageLine->setValidator(new QDoubleValidator);
   ui->maxRetriesLine->setValidator(new QIntValidator(1, 100));
@@ -298,58 +309,52 @@ void MainDialog::populateUIComponents() {
 #endif
 }
 
+bool MainDialog::setRestartTickRowValues(
+      std::optional<korrelator::rot_metadata_t> &optValue) {
+  auto const optRestartValue = getIntegralValue(ui->restartTickLine);
+  auto const optPercentage = getIntegralValue(ui->resetPercentageLine);
+  auto const optSpecialEntry = getIntegralValue(ui->specialLine);
+
+  if (!(optRestartValue && optPercentage && optSpecialEntry)) {
+    optValue.reset();
+    return false;
+  }
+
+  auto& v = optValue.emplace();
+  v.restartOnTickEntry = *optRestartValue;
+  v.percentageEntry = v.specialEntry = v.afterDivisionPercentageEntry =
+       v.afterDivisionSpecialEntry = 0.0;
+  if (optPercentage.has_value())
+    v.percentageEntry = *optPercentage;
+  if (optSpecialEntry.has_value())
+    v.specialEntry = *optSpecialEntry;
+
+  if (v.percentageEntry != 0.0)
+    v.afterDivisionPercentageEntry = v.percentageEntry / 100.0;
+  if (v.specialEntry != 0.0)
+    v.afterDivisionSpecialEntry = v.specialEntry / 100.0;
+  return true;
+}
+
 void MainDialog::onApplyButtonClicked() {
   using korrelator::tick_line_type_e;
 
-  auto const index = ui->restartTickCombo->currentIndex();
-  auto const value = getIntegralValue(ui->restartTickLine);
-  if (isnan(value))
-    return;
-
-  if (value == maxDoubleValue || value == 0) {
-    if (ui->specialLine->text().trimmed().isEmpty() &&
-        ui->restartTickLine->text().trimmed().isEmpty() &&
-        ui->resetPercentageLine->text().trimmed().isEmpty()) {
-      if (index == tick_line_type_e::all) {
-        korrelator::restartTickValues[tick_line_type_e::all].reset();
-        korrelator::restartTickValues[tick_line_type_e::normal].reset();
-        korrelator::restartTickValues[tick_line_type_e::ref].reset();
-      } else if (index == tick_line_type_e::special) {
-        korrelator::restartTickValues[tick_line_type_e::special].reset();
-        m_resetPercentage = maxDoubleValue;
-        m_specialRef = maxDoubleValue;
-        m_doingManualReset = false;
-      } else {
-        korrelator::restartTickValues[index].reset();
-      }
-    }
-    return ui->restartTickLine->setFocus();
-  }
-
-  if (index == tick_line_type_e::all) {
-    korrelator::restartTickValues[tick_line_type_e::normal].emplace(value);
-    korrelator::restartTickValues[tick_line_type_e::ref].emplace(value);
-  } else if (index == tick_line_type_e::special) {
-    auto const specialValue = getIntegralValue(ui->specialLine);
-    if (isnan(specialValue))
-      return;
-    m_resetPercentage = getIntegralValue(ui->resetPercentageLine);
-    if (isnan(m_resetPercentage)) {
-      m_resetPercentage = maxDoubleValue;
-      return;
-    }
-
-    if (specialValue == maxDoubleValue)
-      korrelator::restartTickValues[tick_line_type_e::special].reset();
-    else
-      korrelator::restartTickValues[tick_line_type_e::special].emplace(value);
-    m_specialRef = specialValue;
-    m_doingManualReset = m_resetPercentage != maxDoubleValue;
-    return ui->specialLine->setFocus();
+  bool valueSet = false;
+  if (int const index = ui->restartTickCombo->currentIndex();
+      index == 0) {
+    valueSet = setRestartTickRowValues(m_restartTickValues.normalLines);
+  } else if (index == 1) {
+    valueSet = setRestartTickRowValues(m_restartTickValues.refLines);
+  } else if (index == 2) {
+    setRestartTickRowValues(m_restartTickValues.normalLines);
+    valueSet = setRestartTickRowValues(m_restartTickValues.refLines);
   } else {
-    korrelator::restartTickValues[index].emplace(value);
+    setRestartTickRowValues(m_restartTickValues.special);
   }
-  ui->restartTickLine->setFocus();
+
+  if (valueSet)
+    m_restartTickValues.special.reset();
+  return ui->restartTickLine->setFocus();
 }
 
 void MainDialog::connectAllUISignals() {
@@ -429,11 +434,12 @@ void MainDialog::connectAllUISignals() {
     addNewItemToTokenMap(tokenName, trade_type_e::futures, exchange);
     saveAppConfigToFile();
   });
+
   QObject::connect(ui->applyUmbralButton, &QPushButton::clicked, this, [this] {
-    m_threshold = getIntegralValue(ui->umbralLine);
-    if (isnan(m_threshold))
+    auto const optThreshold = getIntegralValue(ui->umbralLine);
+    if (!optThreshold.has_value())
       return;
-    m_findingUmbral = m_threshold != maxDoubleValue;
+    m_findingUmbral = *optThreshold != 0.0;
     if (m_findingUmbral)
       m_threshold /= 100.0;
   });
@@ -812,6 +818,17 @@ void MainDialog::getExchangeInfo(exchange_name_e const exchange,
   }
 }
 
+QJsonObject getJsonObjectFromRot(
+        korrelator::rot_metadata_t const &v, QString const &name)
+{
+  QJsonObject result;
+  result["name"] = name;
+  result["specialV"] = QString::number(v.specialEntry);
+  result["percentageV"] = QString::number(v.percentageEntry);
+  result["restartV"] = QString::number(v.restartOnTickEntry);
+  return result;
+}
+
 void MainDialog::saveAppConfigToFile() {
   using korrelator::tick_line_type_e;
 
@@ -829,43 +846,18 @@ void MainDialog::saveAppConfigToFile() {
   rootObject["reverse"] = ui->reverseCheckBox->isChecked();
 
   {
-    QJsonArray jsonRestartTicks;
-    auto &specialValue =
-        korrelator::restartTickValues[tick_line_type_e::special];
-    bool const findingSpecialRef =
-        specialValue.has_value() && specialValue.value() != maxDoubleValue;
+    QJsonArray jsonTicks;
+    if (auto& special = m_restartTickValues.special; special.has_value())
+      jsonTicks.append(getJsonObjectFromRot(*special, "Special"));
 
-    if (findingSpecialRef) {
-      QJsonObject obj;
-      obj["name"] = "Special";
-      obj["reduceTo"] = QString::number(m_specialRef);
-      obj["reduceFrom"] = QString::number(m_resetPercentage);
-      obj["maxReach"] = QString::number(specialValue.value());
+    if (auto& value = m_restartTickValues.normalLines; value.has_value())
+      jsonTicks.append(getJsonObjectFromRot(*value, "normalLine"));
 
-      jsonRestartTicks.append(obj);
-    } else {
+    if (auto& ref = m_restartTickValues.refLines; ref.has_value())
+      jsonTicks.append(getJsonObjectFromRot(*ref, "refLine"));
 
-      if (auto const normalLine =
-              korrelator::restartTickValues[tick_line_type_e::normal];
-          normalLine.has_value()) {
-        QJsonObject obj;
-        obj["name"] = "normalLine";
-        obj["maxReach"] = QString::number(normalLine.value());
-        jsonRestartTicks.append(obj);
-      }
-
-      if (auto const refLine =
-              korrelator::restartTickValues[tick_line_type_e::ref];
-          refLine.has_value()) {
-        QJsonObject obj;
-        obj["name"] = "refLine";
-        obj["maxReach"] = QString::number(refLine.value());
-        jsonRestartTicks.append(obj);
-      }
-    }
-
-    if (!jsonRestartTicks.isEmpty())
-      rootObject["restartTicks"] = jsonRestartTicks;
+    if (!jsonTicks.isEmpty())
+      rootObject["ticks"] = jsonTicks;
   }
 
   QJsonArray tokensJsonList;
@@ -948,19 +940,19 @@ void MainDialog::readAppConfigFromFile() {
       auto const reverse = jsonObject.value("reverse").toBool(false);
       ui->reverseCheckBox->setChecked(reverse);
 
-      auto const restartTicks = jsonObject.value("restartTicks").toArray();
+      auto const jsonTicks = jsonObject.value("ticks").toArray();
       ui->restartTickCombo->disconnect(this);
 
-      for (int i = 0; i < restartTicks.size(); ++i) {
-        QJsonObject const tickData = restartTicks[i].toObject();
+      for (int i = 0; i < jsonTicks.size(); ++i) {
+        QJsonObject const tickData = jsonTicks[i].toObject();
         auto const fieldName = tickData.value("name").toString();
-        auto const reduceTo = tickData.value("reduceTo").toString();
-        auto const reduceFrom = tickData.value("reduceFrom").toString();
-        auto const maxReach = tickData.value("maxReach").toString();
+        auto const specialV = tickData.value("specialV").toString();
+        auto const percentageV = tickData.value("percentageV").toString();
+        auto const restartV = tickData.value("restartV").toString();
 
-        ui->resetPercentageLine->setText(reduceFrom);
-        ui->specialLine->setText(reduceTo);
-        ui->restartTickLine->setText(maxReach);
+        ui->resetPercentageLine->setText(percentageV);
+        ui->specialLine->setText(specialV);
+        ui->restartTickLine->setText(restartV);
 
         if (fieldName.compare("special", Qt::CaseInsensitive) == 0) {
           ui->restartTickCombo->setCurrentIndex(tick_line_type_e::special);
@@ -1258,7 +1250,7 @@ void MainDialog::getInitialTokenPrices() {
   }
 }
 
-double MainDialog::getIntegralValue(QLineEdit *lineEdit) {
+std::optional<double> MainDialog::getIntegralValue(QLineEdit *lineEdit) {
   auto const resetTickerStr = lineEdit->text().trimmed();
   if (!resetTickerStr.isEmpty()) {
     bool isOK = true;
@@ -1268,35 +1260,42 @@ double MainDialog::getIntegralValue(QLineEdit *lineEdit) {
           this, "Error",
           "Something is wrong with the input value, please check");
       lineEdit->setFocus();
-      return NAN;
+      return std::nullopt;
     }
     return restartNumber;
   }
-  return maxDoubleValue;
+  return 0;
 }
 
 bool MainDialog::validateUserInput() {
-  maxOrderRetries = getIntegralValue(ui->maxRetriesLine);
-  if (isnan(maxOrderRetries))
-    return false;
-  if (maxOrderRetries == maxDoubleValue)
-    maxOrderRetries = 10;
+  if (auto const maxRetries = getIntegralValue(ui->maxRetriesLine); maxRetries.has_value()) {
+    if (*maxRetries == 0.0)
+      maxOrderRetries = 10.0;
+    else
+      maxOrderRetries = *maxRetries;
+  } else return false;
 
-  if (m_doingManualReset)
-    m_resetPercentage /= 100.0;
+  m_doingAutoLDClosure = false;
+  if (m_restartTickValues.special.has_value()) {
+    m_doingManualLDClosure = m_restartTickValues.special->restartOnTickEntry != 0.0;
+    m_doingAutoLDClosure =
+      m_restartTickValues.special->percentageEntry != 0.0 &&
+      m_restartTickValues.special->specialEntry != 0.0;
+  }/* else {
+    m_doingManualLDClosure =
+            (m_restartTickValues.normalLines.has_value() &&
+             m_restartTickValues.normalLines->restartOnTickEntry != 0.0) ||
+            (m_restartTickValues.refLines.has_value() &&
+             m_restartTickValues.refLines->restartOnTickEntry != 0.0);
+  }*/
 
-  m_threshold = getIntegralValue(ui->umbralLine);
-  if (isnan(m_threshold))
-    return false;
-  m_findingUmbral = m_threshold != maxDoubleValue;
-  if (m_findingUmbral)
-    m_threshold /= 100.0;
+  if (auto const threshold = getIntegralValue(ui->umbralLine); threshold.has_value()){
+    m_threshold = *threshold;
+    m_findingUmbral = *threshold != 0.0;
 
-  auto &specialValue = korrelator::restartTickValues[3];
-  m_findingSpecialRef =
-      specialValue.has_value() && specialValue.value() != maxDoubleValue;
-  if (m_findingSpecialRef)
-    m_specialRef /= 100.0;
+    if (m_findingUmbral)
+      m_threshold /= 100.0;
+  } else return false;
 
   if (m_tokens.size() > 2) {
     QMessageBox::critical(this, tr("Error"), "You can only trade one token");
@@ -1376,7 +1375,7 @@ void MainDialog::calculatePriceNormalization() {
 void MainDialog::updateKuCoinTradeConfiguration() {
   using korrelator::trade_type_e;
   {
-    for (int x = 0; x < m_tradeConfigDataList.size(); ++x) {
+    for (size_t x = 0; x < m_tradeConfigDataList.size(); ++x) {
       auto &configuration = m_tradeConfigDataList[x];
       if (configuration.exchange != exchange_name_e::kucoin)
         continue;
@@ -1489,16 +1488,15 @@ MainDialog::updateRefGraph(double const keyStart, double const keyEnd,
   auto &value = m_tokens[0];
   ++value.graphPointsDrawnCount;
 
-  if (!m_findingSpecialRef) {
-    auto const &refTickValue =
-        korrelator::restartTickValues[tick_line_type_e::ref];
+  if (!m_doingManualLDClosure) {
     refResult.isResettingRef =
-        refTickValue.has_value() &&
-        (value.graphPointsDrawnCount >= (qint64)*refTickValue);
+        m_restartTickValues.refLines &&
+        value.graphPointsDrawnCount >=
+            (qint64)m_restartTickValues.refLines->restartOnTickEntry;
   } else {
-    auto const &refTickValue =
-        korrelator::restartTickValues[tick_line_type_e::special];
-    refResult.eachTickNormalize = value.graphPointsDrawnCount >= *refTickValue;
+    auto const &specialTickValue = m_restartTickValues.special;
+    refResult.eachTickNormalize = specialTickValue.has_value() &&
+       value.graphPointsDrawnCount >= specialTickValue->restartOnTickEntry;
   }
 
   if (refResult.isResettingRef || refResult.eachTickNormalize)
@@ -1552,9 +1550,10 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     value.prevNormalizedPrice = value.normalizedPrice;
 
   isResettingSymbols =
-      !m_findingSpecialRef && korrelator::restartTickValues[0].has_value() &&
-      (value.graphPointsDrawnCount >=
-       (qint64)(*korrelator::restartTickValues[tick_line_type_e::normal]));
+      !m_doingManualLDClosure &&
+       m_restartTickValues.normalLines.has_value() &&
+       (value.graphPointsDrawnCount >=
+        (qint64)m_restartTickValues.normalLines->restartOnTickEntry);
 
   if (isResettingSymbols)
     value.graphPointsDrawnCount = 0;
@@ -1597,16 +1596,18 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     }
   }
 
-  if (refResult.eachTickNormalize || m_doingManualReset) {
+  if (refResult.eachTickNormalize || m_doingAutoLDClosure) {
     currentRef /= refSymbol.alpha;
     auto const distanceFromRefToSymbol = // a
         ((value.normalizedPrice > currentRef)
              ? (value.normalizedPrice / currentRef)
              : (currentRef / value.normalizedPrice)) -
         1.0;
-    auto const distanceThreshold = m_specialRef; // b
+    auto const distanceThreshold =
+        m_restartTickValues.special->afterDivisionSpecialEntry; // b
     bool const resettingRef =
-        m_doingManualReset && distanceFromRefToSymbol > m_resetPercentage;
+        m_doingAutoLDClosure && distanceFromRefToSymbol >
+            m_restartTickValues.special->afterDivisionPercentageEntry;
 
     if (refResult.eachTickNormalize || resettingRef) {
       if (value.normalizedPrice > currentRef) {

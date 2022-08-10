@@ -4,6 +4,8 @@
 #include "kucoin_websocket.hpp"
 #include "ftx_websocket.hpp"
 
+#include <thread>
+
 namespace korrelator {
 
 std::unique_ptr<net::io_context> &getRawIOContext() {
