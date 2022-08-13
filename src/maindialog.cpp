@@ -340,16 +340,21 @@ void MainDialog::onApplyButtonClicked() {
   using korrelator::tick_line_type_e;
 
   bool valueSet = false;
-  if (int const index = ui->restartTickCombo->currentIndex();
-      index == 0) {
+  int const index = ui->restartTickCombo->currentIndex();
+  if (index == 0) {
     valueSet = setRestartTickRowValues(m_restartTickValues.normalLines);
+    m_restartTickValues.special.reset();
   } else if (index == 1) {
     valueSet = setRestartTickRowValues(m_restartTickValues.refLines);
+    m_restartTickValues.special.reset();
   } else if (index == 2) {
-    setRestartTickRowValues(m_restartTickValues.normalLines);
     valueSet = setRestartTickRowValues(m_restartTickValues.refLines);
+    setRestartTickRowValues(m_restartTickValues.normalLines);
+    m_restartTickValues.special.reset();
   } else {
     setRestartTickRowValues(m_restartTickValues.special);
+    m_restartTickValues.normalLines.reset();
+    m_restartTickValues.refLines.reset();
   }
 
   if (valueSet)
