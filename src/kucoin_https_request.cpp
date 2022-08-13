@@ -5,7 +5,7 @@
 
 namespace korrelator {
 
-kucoin_https_plug::kucoin_https_plug(net::io_context &ioContext,
+kucoin_trader::kucoin_trader(net::io_context &ioContext,
                                      ssl::context &sslContext,
                                      trade_type_e const tradeType,
                                      api_data_t const &apiData,
@@ -20,37 +20,37 @@ kucoin_https_plug::kucoin_https_plug(net::io_context &ioContext,
   }
 }
 
-void kucoin_https_plug::setPrice(double const price) {
+void kucoin_trader::setPrice(double const price) {
   if (m_tradeType == trade_type_e::futures)
     return m_exchangePlug.futures->setPrice(price);
   m_exchangePlug.spot->setPrice(price);
 }
 
-void kucoin_https_plug::startConnect() {
+void kucoin_trader::startConnect() {
   if (m_tradeType == trade_type_e::futures)
     return m_exchangePlug.futures->startConnect();
   m_exchangePlug.spot->startConnect();
 }
 
-double kucoin_https_plug::quantityPurchased() const {
+double kucoin_trader::quantityPurchased() const {
   if (m_tradeType == trade_type_e::futures)
     return m_exchangePlug.futures->quantityPurchased();
   return m_exchangePlug.spot->quantityPurchased();
 }
 
-double kucoin_https_plug::sizePurchased() const {
+double kucoin_trader::sizePurchased() const {
   if (m_tradeType == trade_type_e::futures)
     return m_exchangePlug.futures->sizePurchased();
   return m_exchangePlug.spot->sizePurchased();
 }
 
-QString kucoin_https_plug::errorString() const {
+QString kucoin_trader::errorString() const {
   if (m_tradeType == trade_type_e::futures)
     return m_exchangePlug.futures->errorString();
   return m_exchangePlug.spot->errorString();
 }
 
-kucoin_https_plug::~kucoin_https_plug() {
+kucoin_trader::~kucoin_trader() {
   if (m_tradeType == trade_type_e::futures)
     delete m_exchangePlug.futures;
   else

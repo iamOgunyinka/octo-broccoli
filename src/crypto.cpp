@@ -49,7 +49,7 @@ std::string base64_encode(std::basic_string<unsigned char> const &bindata) {
 std::string base64_encode(std::string const &bindata) {
   std::basic_string<unsigned char> temp{};
   temp.resize(bindata.size());
-  for (int i = 0; i < bindata.size(); ++i) {
+  for (size_t i = 0; i < bindata.size(); ++i) {
     temp[i] = static_cast<unsigned char>(bindata[i]);
   }
   return base64_encode(temp);
