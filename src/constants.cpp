@@ -31,13 +31,13 @@ char const *const constants::kc_spot_http_request =
 #else
 char const * const constants::root_dir = "config";
 char const * const constants::trade_json_filename =
-    "./config/trade.json";
+    "trade.json";
 char const * const constants::app_json_filename =
-    "./config/app.json";
+    "app.json";
 char const * const constants::old_json_filename =
-    "./config/korrelator.json";
-char const * const constants::encrypted_config_filename = "config/.config.dat";
-char const * const constants::config_json_filename = "config/config.json";
+    "korrelator.json";
+char const * const constants::encrypted_config_filename = "config.dat";
+char const * const constants::config_json_filename = "config.json";
 char const *const constants::binance_ws_spot_url = "stream.binance.com";
 char const *const constants::binance_http_spot_host = "api.binance.com";
 char const *const constants::binance_ws_spot_port = "9443";

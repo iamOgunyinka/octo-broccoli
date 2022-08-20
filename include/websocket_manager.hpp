@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <map>
+#include <memory>
 #include <variant>
 #include <vector>
 
@@ -33,7 +34,6 @@ enum class trade_type_e;
 enum class exchange_name_e;
 
 net::ssl::context &getSSLContext();
-net::io_context* getIOContext();
 
 class websocket_manager {
 
@@ -53,7 +53,7 @@ public:
 
 private:
   net::ssl::context &m_sslContext;
-  net::io_context *m_ioContext = nullptr;
+  std::unique_ptr<net::io_context> m_ioContext;
   std::vector<socket_variant> m_sockets;
   std::map<exchange_name_e, std::vector<exchange_trade_pair>> m_checker;
 };

@@ -9,12 +9,16 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-#include "constants.hpp"
-#include "sodium.h"
+#include <filesystem>
 
-SettingsDialog::SettingsDialog(QWidget *parent)
+#include <sodium.h>
+#include "constants.hpp"
+
+SettingsDialog::SettingsDialog(std::string const &path, QString const &title,
+                               QWidget *parent)
   : QDialog(parent)
-  , ui(new Ui::SettingsDialog)
+  , ui(new Ui::SettingsDialog),
+    m_directory(path)
 {
   ui->setupUi(this);
   ui->encryptCheckbox->setChecked(false);
@@ -38,7 +42,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     ui->spotPassphraseLine->setText(valueIter->spotApiPassphrase);
     ui->futuresApiKeyLine->setText(valueIter->futuresApiKey);
     ui->futuresSecretLine->setText(valueIter->futuresApiSecret);
-    ui->futuresPassphraseLine->setText(valueIter->futuresApiPassphrase);
+    ui->futuresPassphraseLine->setText(valueIter->futuresApiPassphrase);    
   });
 
   QObject::connect(ui->saveButton, &QPushButton::clicked, this, [this]{
@@ -65,6 +69,10 @@ SettingsDialog::SettingsDialog(QWidget *parent)
       return writeEncryptedFile(payload);
     writeUnencryptedFile(payload);
   });
+
+  if (!title.isEmpty())
+    setWindowTitle(tr("Settings for ") + title);
+
   readConfigurationFile();
   ui->spotPassphraseLine->setFocus();
 }
@@ -173,12 +181,18 @@ void SettingsDialog::writeEncryptedFile(QByteArray const & payload) {
 
   using korrelator::constants;
 
-  QFile file{constants::encrypted_config_filename};
+  auto const rootPath = std::filesystem::path(m_directory);
+  auto const filename = (rootPath / constants::encrypted_config_filename).string();
+
+  QFile file{filename.c_str()};
   if (file.exists())
     file.remove();
 
-  if (QFile f(constants::config_json_filename); f.exists())
-    f.remove();
+  {
+    auto const configFilename = (rootPath / constants::config_json_filename).string();
+    if (QFile f(configFilename.c_str()); f.exists())
+      f.remove();
+  }
 
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
     QMessageBox::critical(this, "Error", "Unable to save file to file");
@@ -193,34 +207,47 @@ void SettingsDialog::writeEncryptedFile(QByteArray const & payload) {
 
 void SettingsDialog::writeUnencryptedFile(QByteArray const & payload) {
   using korrelator::constants;
-  QFile file{constants::config_json_filename};
+
+  auto const rootPath = std::filesystem::path(m_directory);
+  auto const filename = (rootPath / constants::config_json_filename).string();
+
+  QFile file{filename.c_str()};
   if (file.exists())
     file.remove();
 
-  if (QFile f(constants::encrypted_config_filename); f.exists())
-    f.remove();
+  {
+    auto const configFilename =
+        (rootPath / constants::encrypted_config_filename).string();
+    if (QFile f(configFilename.c_str()); f.exists())
+      f.remove();
+  }
 
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
     QMessageBox::critical(this, "Error", "Unable to save file to file");
     return;
   }
+
   file.write(payload);
   QMessageBox::information(this, "Saved", "Changes saved successfully");
 }
 
 void SettingsDialog::readConfigurationFile() {
   using korrelator::constants;
+
+  auto const rootPath = std::filesystem::path(m_directory);
+
   {
+    auto const filename = (rootPath / constants::config_json_filename).string();
     // priorities on unencrypted file, read this first
-    QFile unencyrptedFile(constants::config_json_filename);
+    QFile unencyrptedFile(filename.c_str());
     if (unencyrptedFile.exists() && unencyrptedFile.open(QIODevice::ReadOnly))
       return readUnencryptedData(unencyrptedFile.readAll());
   }
 
-  QFile encryptedFile(constants::encrypted_config_filename);
-  if (!encryptedFile.exists() || !encryptedFile.open(QIODevice::ReadOnly))
-    return;
-  return readEncryptedFile(encryptedFile);
+  auto const filename = (rootPath / constants::encrypted_config_filename).string();
+  QFile encryptedFile(filename.c_str());
+  if (encryptedFile.exists() && encryptedFile.open(QIODevice::ReadOnly))
+    return readEncryptedFile(encryptedFile);
 }
 
 void SettingsDialog::readEncryptedFile(QFile& file) {
@@ -299,7 +326,7 @@ void SettingsDialog::readUnencryptedData(QByteArray const & fileContent) {
     ui->exchangeCombo->setCurrentIndex(0);
 }
 
-SettingsDialog::api_data_map_t SettingsDialog::getApiDataMap() {
-  SettingsDialog dialog;
+SettingsDialog::api_data_map_t SettingsDialog::getApiDataMap(std::string const &path) {
+  SettingsDialog dialog(path, "");
   return dialog.apiDataMap();
 }

@@ -30,8 +30,9 @@ class kucoin_trader {
 
 public:
   kucoin_trader(net::io_context &, ssl::context &,
-                    trade_type_e const tradeType,
-                    api_data_t const &apiData, trade_config_data_t *);
+                trade_type_e const tradeType,
+                api_data_t const &apiData, trade_config_data_t*,
+                int const errorMaxRetries);
 
   ~kucoin_trader();
   void setPrice(double const price);

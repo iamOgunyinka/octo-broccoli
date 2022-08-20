@@ -3,7 +3,6 @@
 #include "maindialog.hpp"
 #include "ui_maindialog.h"
 
-#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -11,6 +10,7 @@
 #include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QCloseEvent>
 #include <set>
 
 #include "binance_symbols.hpp"
@@ -24,15 +24,7 @@
 #include "qcustomplot.h"
 #include "websocket_manager.hpp"
 
-static constexpr const double maxDoubleValue =
-    std::numeric_limits<double>::max();
-double maxOrderRetries = 10.0;
-
 namespace korrelator {
-
-static double maxVisiblePlot = 100.0;
-static QElapsedTimer time{};
-static double lastPoint = 0.0;
 
 QString actionTypeToString(trade_action_e a) {
   if (a == trade_action_e::buy)
@@ -108,8 +100,8 @@ void token_t::reset() {
   crossedOver = false;
   calculatingNewMinMax = true;
   pricePrecision = quantityPrecision = baseAssetPrecision = quotePrecision = -1;
-  minPrice = prevNormalizedPrice = maxDoubleValue;
-  maxPrice = -maxDoubleValue;
+  minPrice = prevNormalizedPrice = CMAX_DOUBLE_VALUE;
+  maxPrice = - (CMAX_DOUBLE_VALUE);
   alpha = 1.0;
   baseMinSize = 0.0;
   quoteMinSize = 0.0;
@@ -122,22 +114,11 @@ void token_t::reset() {
   crossOver.reset();
 }
 
-struct plug_data_t {
-  api_data_t apiInfo;
-  trade_config_data_t *tradeConfig;
-  trade_type_e tradeType;
-  exchange_name_e exchange;
-  time_t currentTime;
-  double tokenPrice;
-  // for kucoin only
-  double multiplier = 0.0;
-  double tickSize = 0.0;
-};
-
 symbol_fetcher_t::symbol_fetcher_t():
     binance{nullptr}, kucoin{nullptr}, ftx{nullptr}
 {
 }
+
 symbol_fetcher_t::~symbol_fetcher_t() {
   binance.reset();
   kucoin.reset();
@@ -145,12 +126,13 @@ symbol_fetcher_t::~symbol_fetcher_t() {
 
 } // namespace korrelator
 
-static korrelator::waitable_container_t<korrelator::plug_data_t> token_plugs{};
-static korrelator::waitable_container_t<double> graph_keys{};
-
-MainDialog::MainDialog(QWidget *parent)
+MainDialog::MainDialog(
+    bool &warnOnExit,
+    std::filesystem::path const configDirectory,
+    QWidget *parent)
     : QDialog(parent), ui(new Ui::MainDialog), m_websocket(nullptr),
-    m_legendLayout(nullptr)
+    m_legendLayout(nullptr), m_configDirectory(configDirectory),
+    m_warnOnExit(warnOnExit)
 {
 
   ui->setupUi(this);
@@ -175,15 +157,24 @@ MainDialog::MainDialog(QWidget *parent)
   readAppConfigFromFile();
   readTradesConfigFromFile();
 
-  m_apiTradeApiMap = SettingsDialog::getApiDataMap();
+  m_apiTradeApiMap = SettingsDialog::getApiDataMap(m_configDirectory.string());
   if (m_apiTradeApiMap.empty()) {
     QMessageBox::information(this, "Information",
                              "To automate orders, please use the settings "
                              "button to add new API information");
   }
 
-  std::thread{[this] { tradeExchangeTokens(this, m_model); }}.detach();
-  std::thread{[this] { updatePlottingKey(); }}.detach();
+  std::thread{
+    [this] {
+      tradeExchangeTokens(this, m_tokenPlugs, m_model, this->m_maxOrderRetries);
+    }
+  }.detach();
+
+  std::thread{
+    [this] {
+      updatePlottingKey(m_graphKeys, ui->customPlot, m_maxVisiblePlot);
+    }
+  }.detach();
 
   QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
     for (auto const &exchange :
@@ -192,10 +183,6 @@ MainDialog::MainDialog(QWidget *parent)
       getFuturesTokens(exchange);
     }
   });
-
-#ifdef TESTNET
-  this->setWindowTitle("Korrelator(Testnet)");
-#endif
 }
 
 void MainDialog::connectRestartTickSignal() {
@@ -245,6 +232,16 @@ MainDialog::~MainDialog() {
   saveAppConfigToFile();
 
   delete ui;
+}
+
+void MainDialog::closeEvent(QCloseEvent* closeEvent) {
+  if (m_warnOnExit && m_programIsRunning) {
+    auto const response = QMessageBox::question(
+          this, tr("Close"), tr("Are you sure you want to close this window?"));
+    if (response == QMessageBox::No)
+      return closeEvent->ignore();
+  }
+  closeEvent->accept();
 }
 
 void MainDialog::takeBackToFactoryReset() {
@@ -377,28 +374,28 @@ void MainDialog::connectAllUISignals() {
 
   QObject::connect(ui->applySpecialButton, &QPushButton::clicked, this,
                    &MainDialog::onApplyButtonClicked);
-  QObject::connect(ui->openConfigFolderButton, &QPushButton::clicked, this, [] {
-    QProcess process;
-    process.setWorkingDirectory(".");
-    process.startDetached("explorer", QStringList()
-                                          << korrelator::constants::root_dir);
-  });
   QObject::connect(this, &MainDialog::newOrderDetected, this,
                    [this](auto a, auto b, exchange_name_e const exchange,
                           trade_type_e const tt) {
                      onNewOrderDetected(std::move(a), std::move(b), exchange,
                                         tt);
                    });
-  QObject::connect(ui->reloadTradeConfigButton, &QPushButton::clicked, this,
-                   [this] { readTradesConfigFromFile(); });
+  /*
+  QObject::connect(ui->openConfigFolderButton, &QPushButton::clicked, this, [] {
+    QProcess process;
+    process.setWorkingDirectory(".");
+    process.startDetached("explorer", QStringList()
+                                          << korrelator::constants::root_dir);
+  });
+  */
   QObject::connect(
       ui->selectionCombo,
       static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
       this, [this](int const) {
-        korrelator::maxVisiblePlot = getMaxPlotsInVisibleRegion();
+        m_maxVisiblePlot = getMaxPlotsInVisibleRegion();
         if (!m_programIsRunning) {
-          double const key = korrelator::time.elapsed() / 1'000.0;
-          ui->customPlot->xAxis->setRange(key, korrelator::maxVisiblePlot,
+          double const key = m_elapsedTime.elapsed() / 1'000.0;
+          ui->customPlot->xAxis->setRange(key, m_maxVisiblePlot,
                                           Qt::AlignRight);
           ui->customPlot->replot();
         }
@@ -426,8 +423,6 @@ void MainDialog::connectAllUISignals() {
 
   QObject::connect(ui->startButton, &QPushButton::clicked, this,
                    &MainDialog::onOKButtonClicked);
-  QObject::connect(ui->settingsButton, &QToolButton::clicked, this,
-                   &MainDialog::onSettingsDialogClicked);
 
   QObject::connect(ui->futuresNextButton, &QToolButton::clicked, this, [this] {
     auto const tokenName = ui->futuresCombo->currentText().trimmed();
@@ -533,7 +528,7 @@ void MainDialog::stopGraphPlotting() {
 
   korrelator::plug_data_t data;
   data.tradeType = trade_type_e::unknown;
-  token_plugs.append(std::move(data));
+  m_tokenPlugs.append(std::move(data));
   m_websocket.reset();
 }
 
@@ -612,7 +607,7 @@ void MainDialog::newItemAdded(QString const &tokenName, trade_type_e const tt,
       token.symbolName = "*";
       token.calculatingNewMinMax = true;
       token.tradeType = tt;
-      token.normalizedPrice = maxDoubleValue;
+      token.normalizedPrice = CMAX_DOUBLE_VALUE;
       m_tokens.push_back(std::move(token));
     }
 
@@ -840,7 +835,9 @@ void MainDialog::saveAppConfigToFile() {
   if (ui->tokenListWidget->count() == 0)
     return;
 
-  QFile file{korrelator::constants::app_json_filename};
+  auto const filenameFs = m_configDirectory / korrelator::constants::app_json_filename;
+  auto const filename = filenameFs.string();
+  QFile file{filename.c_str()};
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
     return;
 
@@ -917,11 +914,18 @@ void MainDialog::readAppConfigFromFile() {
   QJsonArray tokenJsonList;
 
   {
-    QDir().mkpath(constants::root_dir);
-    if (QFileInfo::exists(constants::old_json_filename))
-      QFile::rename(constants::old_json_filename, constants::app_json_filename);
+    auto const appFilename =
+        (m_configDirectory / constants::app_json_filename).string();
+    QDir().mkpath(m_configDirectory.string().c_str());
 
-    QFile file{constants::app_json_filename};
+    {
+      auto const oldFilename =
+          (m_configDirectory / constants::old_json_filename).string();
+      if (QFileInfo::exists(oldFilename.c_str()))
+        QFile::rename(oldFilename.c_str(), appFilename.c_str());
+    }
+
+    QFile file{appFilename.c_str()};
     if (!file.open(QIODevice::ReadOnly))
       return;
 
@@ -938,9 +942,9 @@ void MainDialog::readAppConfigFromFile() {
           std::clamp(jsonObject.value("graphThickness").toInt(), 1, 5);
       ui->graphThicknessCombo->setCurrentIndex(graphThickness - 1);
 
-      maxOrderRetries =
+      m_maxOrderRetries =
           std::clamp(jsonObject.value("maxRetries").toInt(), 1, 10);
-      ui->maxRetriesLine->setText(QString::number(maxOrderRetries));
+      ui->maxRetriesLine->setText(QString::number(m_maxOrderRetries));
 
       auto const reverse = jsonObject.value("reverse").toBool(false);
       ui->reverseCheckBox->setChecked(reverse);
@@ -997,14 +1001,17 @@ void MainDialog::readAppConfigFromFile() {
 }
 
 void MainDialog::readTradesConfigFromFile() {
-  using korrelator::constants;
   QByteArray fileContent;
+
   {
-    QFile file(constants::trade_json_filename);
+    auto const filename =
+        (m_configDirectory / korrelator::constants::trade_json_filename).string();
+    QFile file(filename.c_str());
     if (!file.exists() || !file.open(QIODevice::ReadOnly))
       return;
     fileContent = file.readAll();
   }
+
   auto const jsonObject = QJsonDocument::fromJson(fileContent).object();
   if (jsonObject.isEmpty()) {
     QMessageBox::critical(this, "Error",
@@ -1275,9 +1282,9 @@ std::optional<double> MainDialog::getIntegralValue(QLineEdit *lineEdit) {
 bool MainDialog::validateUserInput() {
   if (auto const maxRetries = getIntegralValue(ui->maxRetriesLine); maxRetries.has_value()) {
     if (*maxRetries == 0.0)
-      maxOrderRetries = 10.0;
+      m_maxOrderRetries = 10;
     else
-      maxOrderRetries = *maxRetries;
+      m_maxOrderRetries = *maxRetries;
   } else return false;
 
   m_doingAutoLDClosure = false;
@@ -1286,13 +1293,7 @@ bool MainDialog::validateUserInput() {
     m_doingAutoLDClosure =
       m_restartTickValues.special->percentageEntry != 0.0 &&
       m_restartTickValues.special->specialEntry != 0.0;
-  }/* else {
-    m_doingManualLDClosure =
-            (m_restartTickValues.normalLines.has_value() &&
-             m_restartTickValues.normalLines->restartOnTickEntry != 0.0) ||
-            (m_restartTickValues.refLines.has_value() &&
-             m_restartTickValues.refLines->restartOnTickEntry != 0.0);
-  }*/
+  }
 
   if (auto const threshold = getIntegralValue(ui->umbralLine); threshold.has_value()){
     m_threshold = *threshold;
@@ -1330,7 +1331,7 @@ void MainDialog::setupOrderTableModel() {
 void MainDialog::onStartVerificationSuccessful() {
   m_programIsRunning = true;
   m_lastTradeAction = korrelator::trade_action_e::nothing;
-  korrelator::maxVisiblePlot = getMaxPlotsInVisibleRegion();
+  m_maxVisiblePlot = getMaxPlotsInVisibleRegion();
 
   ui->startButton->setText("Stop");
   resetGraphComponents();
@@ -1438,10 +1439,10 @@ void MainDialog::startWebsocket() {
   m_graphUpdater.worker = std::make_unique<korrelator::Worker>([this] {
     QMetaObject::invokeMethod(this, [this] {
       /* Set up and initialize the graph plotting timer */
-      korrelator::time.restart();
+      m_elapsedTime.restart();
       QObject::connect(&m_timerPlot, &QTimer::timeout,
                        m_graphUpdater.worker.get(), [this] { onTimerTick(); });
-      korrelator::lastPoint = 0.0;
+      m_lastGraphPoint = 0.0;
       auto const timerTick = getTimerTickMilliseconds();
       m_timerPlot.start(timerTick);
     });
@@ -1532,11 +1533,11 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
 
   static char const *const legendDisplayFormat = "%1(%2)";
   double const keyStart =
-      (key >= korrelator::maxVisiblePlot ? (key - korrelator::maxVisiblePlot)
+      (key >= m_maxVisiblePlot ? (key - m_maxVisiblePlot)
                                          : 0.0);
   auto &refSymbol = m_tokens[0];
   double const prevRef =
-      (m_hasReferences) ? refSymbol.normalizedPrice : maxDoubleValue;
+      (m_hasReferences) ? refSymbol.normalizedPrice : CMAX_DOUBLE_VALUE;
 
   // update ref symbol data on the graph
   auto refResult = (!m_hasReferences)
@@ -1551,7 +1552,7 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   // update the real symbols
   auto &value = m_tokens[1];
   ++value.graphPointsDrawnCount;
-  if (value.prevNormalizedPrice == maxDoubleValue)
+  if (value.prevNormalizedPrice == CMAX_DOUBLE_VALUE)
     value.prevNormalizedPrice = value.normalizedPrice;
 
   isResettingSymbols =
@@ -1650,27 +1651,29 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
 }
 
 void MainDialog::onTimerTick() {
-  double const key = korrelator::time.elapsed() / 1'000.0;
+  double const key = m_elapsedTime.elapsed() / 1'000.0;
 
   // update the min max on the y-axis every second
-  bool const updatingMinMax = (key - korrelator::lastPoint) >= 1.0;
+  bool const updatingMinMax = (key - m_lastGraphPoint) >= 1.0;
   if (updatingMinMax)
-    korrelator::lastPoint = key;
+    m_lastGraphPoint = key;
 
   calculatePriceNormalization();
   updateGraphData(key, updatingMinMax);
 
-  graph_keys.append(key);
+  m_graphKeys.append(key);
 }
 
-void MainDialog::updatePlottingKey() {
+void MainDialog::updatePlottingKey(
+    korrelator::waitable_container_t<double>& graphKeys,
+    QCustomPlot* customPlot, double& maxVisiblePlot) {
   while (true) {
-    auto const key = graph_keys.get();
+    auto const key = graphKeys.get();
     // make `key` axis range scroll right with the data at a
     // constant range of `maxVisiblePlot`, set by the user
-    ui->customPlot->xAxis->setRange(key, korrelator::maxVisiblePlot,
-                                    Qt::AlignRight);
-    ui->customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
+    customPlot->xAxis->setRange(key, maxVisiblePlot,
+                                Qt::AlignRight);
+    customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
   }
 }
 
@@ -1715,7 +1718,8 @@ void MainDialog::generateJsonFile(korrelator::model_data_t const &modelData) {
 }
 
 void MainDialog::onSettingsDialogClicked() {
-  auto dialog = new SettingsDialog{this};
+  auto dialog = new SettingsDialog{
+      m_configDirectory.string(), this->windowTitle(), this};
   QObject::connect(dialog, &SettingsDialog::finished, this,
                    [this, dialog] { m_apiTradeApiMap = dialog->apiDataMap(); });
   QObject::connect(dialog, &SettingsDialog::finished, dialog,
@@ -1821,7 +1825,7 @@ void MainDialog::sendExchangeRequest(
     case exchange_name_e::binance:
     case exchange_name_e::ftx:
     case exchange_name_e::kucoin:
-      return token_plugs.append(std::move(data));
+      return m_tokenPlugs.append(std::move(data));
     default:
       break;
     }
@@ -1830,7 +1834,10 @@ void MainDialog::sendExchangeRequest(
 }
 
 void MainDialog::tradeExchangeTokens(
-    MainDialog *mainDialog, std::unique_ptr<korrelator::order_model> &model) {
+    MainDialog *mainDialog,
+    korrelator::waitable_container_t<korrelator::plug_data_t>& tokenPlugs,
+    std::unique_ptr<korrelator::order_model> &model,
+    int &maxRetries) {
   using korrelator::binance_trader;
   using korrelator::kucoin_trader;
   using korrelator::ftx_trader;
@@ -1853,7 +1860,7 @@ void MainDialog::tradeExchangeTokens(
   korrelator::model_data_t *modelData = nullptr;
 
   while (true) {
-    auto tradeMetadata = token_plugs.get();
+    auto tradeMetadata = tokenPlugs.get();
     modelData = nullptr;
 
     if (model)
@@ -1861,7 +1868,7 @@ void MainDialog::tradeExchangeTokens(
 
     // only when program is stopped
     if (tradeMetadata.tradeType == trade_type_e::unknown) {
-      token_plugs.clear();
+      tokenPlugs.clear();
       lastQuantity = NAN;
       futuresLeverageIsSet = false;
       isFirstTrade = true;
@@ -1894,7 +1901,7 @@ void MainDialog::tradeExchangeTokens(
     if (isKuCoin) {
       connector.kucoinTrader = new kucoin_trader(
           ioContext, sslContext, tradeType, tradeMetadata.apiInfo,
-          tradeMetadata.tradeConfig);
+          tradeMetadata.tradeConfig, maxRetries);
       connector.kucoinTrader->setPrice(tradeMetadata.tokenPrice);
       connector.kucoinTrader->startConnect();
     } else if (tradeMetadata.exchange == exchange_name_e::binance) {

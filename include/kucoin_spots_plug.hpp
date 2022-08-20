@@ -33,9 +33,9 @@ class kucoin_spots_plug {
 
   trade_action_e const m_tradeAction;
   process_e m_process;
+  int const m_errorMaxRetries = 0;
   int m_numberOfRetries = 0;
   double m_price = 0.0;
-
   double m_averagePrice = 0.0;
 
   net::io_context &m_ioContext;
@@ -72,7 +72,8 @@ private:
 
 public:
   kucoin_spots_plug(net::io_context &, ssl::context &,
-                    api_data_t const &apiData, trade_config_data_t*);
+                    api_data_t const &apiData, trade_config_data_t*,
+                    int const errorMaxRetries);
 
   ~kucoin_spots_plug();
   void setPrice(double const price) { m_price = price; }

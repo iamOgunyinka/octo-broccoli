@@ -5,13 +5,16 @@
 #include <QMetaType>
 #include <QNetworkAccessManager>
 #include <QTimer>
+#include <QElapsedTimer>
 #include <memory>
 #include <optional>
+#include <filesystem>
 
 #include "order_model.hpp"
 #include "settingsdialog.hpp"
 #include "sthread.hpp"
 #include "tokens.hpp"
+#include "container.hpp"
 
 #define CMAX_DOUBLE_VALUE std::numeric_limits<double>::max()
 
@@ -23,6 +26,7 @@ QT_END_NAMESPACE
 
 class QCPGraph;
 class QCPLayoutGrid;
+class QCustomPlot;
 
 namespace korrelator {
 
@@ -41,8 +45,8 @@ struct price_updater_t {
 struct ref_calculation_data_t {
   bool isResettingRef = false;
   bool eachTickNormalize = false;
-  double minValue = std::numeric_limits<double>::max();
-  double maxValue = -minValue;
+  double minValue = CMAX_DOUBLE_VALUE;
+  double maxValue = - (CMAX_DOUBLE_VALUE);
 };
 
 struct watchable_data_t {
@@ -77,12 +81,23 @@ struct rot_t {
   std::optional<rot_metadata_t> special;
 };
 
+struct plug_data_t {
+  api_data_t apiInfo;
+  trade_config_data_t *tradeConfig;
+  trade_type_e tradeType;
+  exchange_name_e exchange;
+  time_t currentTime;
+  double tokenPrice;
+  // for kucoin only
+  double multiplier = 0.0;
+  double tickSize = 0.0;
+};
 } // namespace korrelator
 
 using korrelator::exchange_name_e;
 using korrelator::trade_type_e;
 
-class MainDialog : public QDialog {
+class MainDialog final: public QDialog {
   Q_OBJECT
 
   using callback_t =
@@ -95,8 +110,14 @@ signals:
                         korrelator::trade_type_e const);
 
 public:
-  MainDialog(QWidget *parent = nullptr);
+  MainDialog(bool& warnOnExit, std::filesystem::path const configDirectory,
+             QWidget *parent = nullptr);
   ~MainDialog();
+  void openPreferenceWindow() { onSettingsDialogClicked(); }
+  void reloadTradeConfig() { readTradesConfigFromFile(); }
+
+  void closeEvent(QCloseEvent*) override;
+  void reject() override {} // ignore all ESC press
 
   void refreshModel(){
     if (m_model)
@@ -117,7 +138,6 @@ private:
   void onOKButtonClicked();
   void onStartVerificationSuccessful();
   void stopGraphPlotting();
-  void updatePlottingKey();
   void saveAppConfigToFile();
   void readAppConfigFromFile();
   void updateKuCoinTradeConfiguration();
@@ -163,8 +183,12 @@ private:
   void sendExchangeRequest(const korrelator::model_data_t &,
                            exchange_name_e const, trade_type_e const tradeType,
                            korrelator::cross_over_data_t const &);
+  static void updatePlottingKey(korrelator::waitable_container_t<double>&,
+                                QCustomPlot* customPlot, double& maxVisiblePlot);
   static void tradeExchangeTokens(
-      MainDialog*, std::unique_ptr<korrelator::order_model>&);
+      MainDialog*,
+      korrelator::waitable_container_t<korrelator::plug_data_t>&,
+      std::unique_ptr<korrelator::order_model>&, int &maxRetries);
 
 private:
   Ui::MainDialog *ui;
@@ -180,11 +204,19 @@ private:
   korrelator::price_updater_t m_priceUpdater;
   korrelator::symbol_fetcher_t m_symbolUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout;
+  korrelator::waitable_container_t<korrelator::plug_data_t> m_tokenPlugs;
+  korrelator::waitable_container_t<double> m_graphKeys;
   QTimer m_timerPlot;
+  QElapsedTimer m_elapsedTime;
   korrelator::trade_action_e m_lastTradeAction;
   korrelator::rot_t m_restartTickValues;
+  std::filesystem::path const m_configDirectory;
 
+  double m_lastGraphPoint = 0.0;
   double m_threshold = 0.0;
+  double m_maxVisiblePlot = 100.0;
+
+  int m_maxOrderRetries = 10;
 
   bool m_doingAutoLDClosure = false; // automatic "line distance" (LD) closure
   bool m_doingManualLDClosure = false; // manualInterval LD closure
@@ -192,6 +224,7 @@ private:
   bool m_firstRun = true;
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;
+  bool& m_warnOnExit;
 };
 
 Q_DECLARE_METATYPE(korrelator::cross_over_data_t);

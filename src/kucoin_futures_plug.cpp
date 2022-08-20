@@ -12,8 +12,6 @@
 #include <rapidjson/writer.h>
 #include <thread>
 
-extern double maxOrderRetries;
-
 namespace korrelator {
 
 namespace details {
@@ -172,10 +170,12 @@ void kucoin_futures_plug::performSSLHandshake() {
 }
 
 kucoin_futures_plug::kucoin_futures_plug(net::io_context &ioContext,
-                                 ssl::context &sslContext,
-                                 api_data_t const &apiData,
-                                 trade_config_data_t *tradeConfig)
-  : m_ioContext(ioContext), m_sslContext(sslContext),
+                                         ssl::context &sslContext,
+                                         api_data_t const &apiData,
+                                         trade_config_data_t *tradeConfig,
+                                         int const errorMaxRetries)
+  : m_errorMaxRetries(errorMaxRetries),
+    m_ioContext(ioContext), m_sslContext(sslContext),
     m_tradeConfig(tradeConfig),
     m_apiKey(apiData.futuresApiKey.toStdString()),
     m_apiSecret(apiData.futuresApiSecret.toStdString()),
@@ -300,7 +300,7 @@ void kucoin_futures_plug::startMonitoringLastOrder() {
 }
 
 void kucoin_futures_plug::initiateResendOrder() {
-  if (++m_numberOfRetries > (int)maxOrderRetries) {
+  if (++m_numberOfRetries > m_errorMaxRetries) {
     m_errorString = "Maximum number of retries";
     return;
   }

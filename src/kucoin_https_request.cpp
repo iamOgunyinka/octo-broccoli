@@ -6,17 +6,19 @@
 namespace korrelator {
 
 kucoin_trader::kucoin_trader(net::io_context &ioContext,
-                                     ssl::context &sslContext,
-                                     trade_type_e const tradeType,
-                                     api_data_t const &apiData,
-                                     trade_config_data_t *tradeConfig)
+                             ssl::context &sslContext,
+                             trade_type_e const tradeType,
+                             api_data_t const &apiData,
+                             trade_config_data_t *tradeConfig,
+                             int const errorMaxRetries)
     : m_tradeType(tradeType) {
   if (trade_type_e::spot == m_tradeType) {
     m_exchangePlug.spot = new details::kucoin_spots_plug(ioContext, sslContext,
-                                                         apiData, tradeConfig);
+                                                         apiData, tradeConfig,
+                                                         errorMaxRetries);
   } else {
     m_exchangePlug.futures = new details::kucoin_futures_plug(
-        ioContext, sslContext, apiData, tradeConfig);
+        ioContext, sslContext, apiData, tradeConfig, errorMaxRetries);
   }
 }
 
