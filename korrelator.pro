@@ -24,7 +24,7 @@ QMAKE_CXXFLAGS += -bigobj
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
-  mainwindow.cpp \
+  src/mainwindow.cpp \
   src/binance_symbols.cpp \
   src/ftx_futures_plug.cpp \
   src/ftx_https_request.cpp \
@@ -37,7 +37,6 @@ SOURCES += main.cpp \
   src/binance_websocket.cpp \
   src/constants.cpp \
   src/crypto.cpp \
-#  src/cwebsocket.cpp \
   src/kucoin_futures_plug.cpp \
   src/kucoin_spots_plug.cpp \
   src/kucoin_https_request.cpp \
@@ -77,10 +76,10 @@ HEADERS += include/binance_symbols.hpp \
   include/websocket_manager.hpp \
   include/settingsdialog.hpp \
   include/kucoin_symbols.hpp \
-  mainwindow.hpp
+  include/mainwindow.hpp
 
 FORMS += ui/settingsdialog.ui \
-    mainwindow.ui \
+    ui/mainwindow.ui \
     ui/maindialog.ui
 
 # Default rules for deployment.
@@ -88,5 +87,4 @@ qnx: target.path = /tmp/$${TARGET}/bin
 elsD: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
-RESOURCES += \
-  image_resouce.qrc
+RESOURCES += resources/image_resouce.qrc

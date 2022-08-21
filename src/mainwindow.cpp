@@ -43,21 +43,21 @@ MainWindow::~MainWindow()
 
 void MainWindow::createActions() {
   m_exitAction = new QAction("&Exit");
-  m_exitAction->setIcon(QIcon(":/image/resources/images/exit.png"));
+  m_exitAction->setIcon(QIcon(":/image/images/exit.png"));
   m_exitAction->setShortcut(QKeySequence("Ctrl+Q"));
   QObject::connect(m_exitAction, &QAction::triggered, this,
                    &MainWindow::close);
 
   m_newDialogAction = new QAction("&New Trade");
   m_newDialogAction->setToolTip("Open a new correlator window");
-  m_newDialogAction->setIcon(QIcon(":/image/resources/images/new.png"));
+  m_newDialogAction->setIcon(QIcon(":/image/images/new.png"));
   m_newDialogAction->setShortcut(QKeySequence("Ctrl+N"));
   QObject::connect(m_newDialogAction, &QAction::triggered, this,
                    &MainWindow::onNewDialogTriggered);
 
   m_preferenceAction = new QAction("&API Key");
   m_preferenceAction->setToolTip("Open the settings window where API Keys can be set");
-  m_preferenceAction->setIcon(QIcon(":/image/resources/images/settings.png"));
+  m_preferenceAction->setIcon(QIcon(":/image/images/settings.png"));
   m_preferenceAction->setShortcut(QKeySequence("Ctrl+E"));
   QObject::connect(m_preferenceAction, &QAction::triggered, this,
                    &MainWindow::onPreferenceTriggered);
@@ -65,7 +65,7 @@ void MainWindow::createActions() {
   m_reloadTradeAction = new QAction("&Reload trade");
   m_reloadTradeAction->setToolTip("Read the trade configuration again. Perhaps, "
                                   "it has been modified while the window is opened.");
-  m_reloadTradeAction->setIcon(QIcon(":/image/resources/images/refresh.png"));
+  m_reloadTradeAction->setIcon(QIcon(":/image/images/refresh.png"));
   m_reloadTradeAction->setShortcut(QKeySequence("F5"));
   QObject::connect(m_reloadTradeAction, &QAction::triggered, this,
                    &MainWindow::onReloadTradeConfigTriggered);
@@ -74,7 +74,7 @@ void MainWindow::createActions() {
   m_aboutAction->setShortcut(QKeySequence("F1"));
   m_aboutAction->setToolTip("Show the software information used for"
                                   " developing this software");
-  m_aboutAction->setIcon(QIcon(":/image/resources/images/about.png"));
+  m_aboutAction->setIcon(QIcon(":/image/images/about.png"));
   QObject::connect(m_aboutAction, &QAction::triggered, qApp,
                    &QApplication::aboutQt);
 }
