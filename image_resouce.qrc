@@ -4,5 +4,6 @@
         <file>resources/images/settings.png</file>
         <file>resources/images/new.png</file>
         <file>resources/images/refresh.png</file>
+        <file>resources/images/about.png</file>
     </qresource>
 </RCC>
