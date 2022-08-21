@@ -15,6 +15,7 @@
 #include "sthread.hpp"
 #include "tokens.hpp"
 #include "container.hpp"
+#include "plug_data.hpp"
 
 #define CMAX_DOUBLE_VALUE std::numeric_limits<double>::max()
 
@@ -81,17 +82,6 @@ struct rot_t {
   std::optional<rot_metadata_t> special;
 };
 
-struct plug_data_t {
-  api_data_t apiInfo;
-  trade_config_data_t *tradeConfig;
-  trade_type_e tradeType;
-  exchange_name_e exchange;
-  time_t currentTime;
-  double tokenPrice;
-  // for kucoin only
-  double multiplier = 0.0;
-  double tickSize = 0.0;
-};
 } // namespace korrelator
 
 using korrelator::exchange_name_e;
@@ -186,7 +176,7 @@ private:
   static void updatePlottingKey(korrelator::waitable_container_t<double>&,
                                 QCustomPlot* customPlot, double& maxVisiblePlot);
   static void tradeExchangeTokens(
-      MainDialog*,
+      std::function<void()> refreshModel,
       korrelator::waitable_container_t<korrelator::plug_data_t>&,
       std::unique_ptr<korrelator::order_model>&, int &maxRetries);
 

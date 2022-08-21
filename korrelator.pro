@@ -46,6 +46,7 @@ SOURCES += main.cpp \
   src/maindialog.cpp \
   src/order_model.cpp \
   src/qcustomplot.cpp \
+  src/single_trader.cpp \
   src/uri.cpp \
   src/websocket_manager.cpp
 
@@ -68,7 +69,9 @@ HEADERS += include/binance_symbols.hpp \
   include/kucoin_websocket.hpp \
   include/maindialog.hpp \
   include/order_model.hpp \
+  include/plug_data.hpp \
   include/qcustomplot.h \
+  include/single_trader.hpp \
   include/sthread.hpp \
   include/uri.hpp \
   include/utils.hpp \

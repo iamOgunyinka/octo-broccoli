@@ -1,5 +1,3 @@
-#include "binance_https_request.hpp"
-
 #include "maindialog.hpp"
 #include "ui_maindialog.h"
 
@@ -16,13 +14,12 @@
 #include "binance_symbols.hpp"
 #include "constants.hpp"
 #include "container.hpp"
-#include "ftx_https_request.hpp"
 #include "ftx_symbols.hpp"
-#include "kucoin_https_request.hpp"
 #include "kucoin_symbols.hpp"
 #include "order_model.hpp"
 #include "qcustomplot.h"
 #include "websocket_manager.hpp"
+#include "single_trader.hpp"
 
 namespace korrelator {
 
@@ -166,7 +163,9 @@ MainDialog::MainDialog(
 
   std::thread{
     [this] {
-      tradeExchangeTokens(this, m_tokenPlugs, m_model, this->m_maxOrderRetries);
+      auto cb = [this]{ refreshModel(); };
+      tradeExchangeTokens(std::move(cb), m_tokenPlugs, m_model,
+                          this->m_maxOrderRetries);
     }
   }.detach();
 
@@ -1834,148 +1833,16 @@ void MainDialog::sendExchangeRequest(
 }
 
 void MainDialog::tradeExchangeTokens(
-    MainDialog *mainDialog,
+    std::function<void()> refreshModel,
     korrelator::waitable_container_t<korrelator::plug_data_t>& tokenPlugs,
     std::unique_ptr<korrelator::order_model> &model,
     int &maxRetries) {
-  using korrelator::binance_trader;
-  using korrelator::kucoin_trader;
-  using korrelator::ftx_trader;
-  using korrelator::trade_action_e;
-  using korrelator::trade_type_e;
 
-// todo: house ftx_*_plugs into a single class like binance
-  union connector_t {
-    kucoin_trader *kucoinTrader;
-    binance_trader *binanceTrader;
-    ftx_trader *ftxTrader;
-  };
-
-  auto &ioContext = korrelator::getExchangeIOContext();
-  auto &sslContext = korrelator::getSSLContext();
-  auto lastAction = trade_action_e::nothing;
-  double lastQuantity = NAN;
-  bool futuresLeverageIsSet = false;
-  bool isFirstTrade = true;
-  korrelator::model_data_t *modelData = nullptr;
-
+  korrelator::SingleTrader singleTrade(refreshModel, model, maxRetries);
   while (true) {
     auto tradeMetadata = tokenPlugs.get();
-    modelData = nullptr;
-
-    if (model)
-      modelData = model->front();
-
-    // only when program is stopped
-    if (tradeMetadata.tradeType == trade_type_e::unknown) {
+    if (tradeMetadata.tradeType == trade_type_e::unknown)
       tokenPlugs.clear();
-      lastQuantity = NAN;
-      futuresLeverageIsSet = false;
-      isFirstTrade = true;
-      lastAction = trade_action_e::nothing;
-      ioContext.stop();
-      ioContext.restart();
-      continue;
-    }
-
-    if (isFirstTrade) {
-      isFirstTrade = false;
-      if (tradeMetadata.tradeType == trade_type_e::spot &&
-          tradeMetadata.tradeConfig->side == trade_action_e::sell) {
-        if (modelData)
-          modelData->remark = "[Order Ignored] First spot trade cannot be "
-                              "a SELL";
-        mainDialog->refreshModel();
-        continue;
-      }
-    }
-
-    if (lastAction != trade_action_e::nothing &&
-        tradeMetadata.tradeType == trade_type_e::futures) {
-      tradeMetadata.tradeConfig->size = lastQuantity;
-    }
-
-    auto const isKuCoin = tradeMetadata.exchange == exchange_name_e::kucoin;
-    connector_t connector;
-    auto const tradeType = tradeMetadata.tradeType;
-    if (isKuCoin) {
-      connector.kucoinTrader = new kucoin_trader(
-          ioContext, sslContext, tradeType, tradeMetadata.apiInfo,
-          tradeMetadata.tradeConfig, maxRetries);
-      connector.kucoinTrader->setPrice(tradeMetadata.tokenPrice);
-      connector.kucoinTrader->startConnect();
-    } else if (tradeMetadata.exchange == exchange_name_e::binance) {
-      connector.binanceTrader = new binance_trader(
-          ioContext, sslContext, tradeType, tradeMetadata.apiInfo,
-          tradeMetadata.tradeConfig);
-      if (!futuresLeverageIsSet && tradeType == trade_type_e::futures) {
-        futuresLeverageIsSet = true;
-        connector.binanceTrader->setLeverage();
-      }
-      connector.binanceTrader->setPrice(tradeMetadata.tokenPrice);
-      connector.binanceTrader->startConnect();
-    } else if (tradeMetadata.exchange == exchange_name_e::ftx) {
-      connector.ftxTrader = new ftx_trader(
-            ioContext, sslContext, tradeType,
-            tradeMetadata.apiInfo, tradeMetadata.tradeConfig);
-      if (!futuresLeverageIsSet && trade_type_e::futures == tradeType) {
-        futuresLeverageIsSet = true;
-        connector.ftxTrader->setAccountLeverage();
-      }
-
-      connector.ftxTrader->setPrice(tradeMetadata.tokenPrice);
-      connector.ftxTrader->startConnect();
-    }
-
-    ioContext.run();
-
-    if (tradeMetadata.tradeType == trade_type_e::futures &&
-        lastAction == trade_action_e::nothing)
-      lastQuantity = tradeMetadata.tradeConfig->size * 2.0;
-    lastAction = tradeMetadata.tradeConfig->side;
-
-    double price = 0.0;
-    QString errorString;
-
-    if (isKuCoin) {
-      auto &kcRequest = *connector.kucoinTrader;
-      auto const quantityPurchased = kcRequest.quantityPurchased();
-      auto const sizePurchased = kcRequest.sizePurchased();
-      if (quantityPurchased != 0.0 && sizePurchased != 0.0) {
-        price = (quantityPurchased / sizePurchased) /
-                tradeMetadata.tradeConfig->multiplier;
-      }
-      errorString = kcRequest.errorString();
-      delete connector.kucoinTrader;
-    } else if (tradeMetadata.exchange == exchange_name_e::binance) {
-      auto &binanceRequest = *connector.binanceTrader;
-      price = binanceRequest.averagePrice();
-      errorString = binanceRequest.errorString();
-      delete connector.binanceTrader;
-    } else if (tradeMetadata.exchange == exchange_name_e::ftx) {
-      price = connector.ftxTrader->getAveragePrice();
-      errorString = connector.ftxTrader->errorString();
-      delete connector.ftxTrader;
-      connector.ftxTrader = nullptr;
-    }
-
-    if (modelData)
-      modelData->exchangePrice = price;
-
-    if (!errorString.isEmpty()) {
-      if (tradeMetadata.tradeType == trade_type_e::futures) {
-        lastAction = trade_action_e::nothing;
-        lastQuantity /= 2.0;
-      }
-      if (modelData)
-        modelData->remark = "Error: " + errorString;
-    } else {
-      if (modelData)
-        modelData->remark = "Success";
-    }
-
-    mainDialog->refreshModel();
-    ioContext.stop();
-    ioContext.restart();
+    singleTrade(std::move(tradeMetadata));
   }
 }
