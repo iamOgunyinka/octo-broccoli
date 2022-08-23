@@ -24,6 +24,7 @@ QMAKE_CXXFLAGS += -bigobj
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
+  src/double_trader.cpp \
   src/mainwindow.cpp \
   src/binance_symbols.cpp \
   src/ftx_futures_plug.cpp \
@@ -51,6 +52,7 @@ SOURCES += main.cpp \
   src/websocket_manager.cpp
 
 HEADERS += include/binance_symbols.hpp \
+  include/double_trader.hpp \
   include/ftx_futures_plug.hpp \
   include/ftx_https_request.hpp \
   include/ftx_spots_plug.hpp \

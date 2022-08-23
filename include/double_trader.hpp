@@ -20,6 +20,7 @@ class io_context;
 } // namespace boost
 
 namespace korrelator {
+
 namespace net = boost::asio;
 
 class binance_trader;
@@ -27,12 +28,11 @@ class kucoin_trader;
 class ftx_trader;
 class order_model;
 
-class single_trader_t
-{
+class double_trader_t {
 public:
-  single_trader_t(std::function<void()> refreshModel,
-               std::unique_ptr<order_model> &model, int &maxRetries);
-  void operator()(plug_data_t &&plugData);
+    double_trader_t(std::function<void()> refreshModel,
+                 std::unique_ptr<order_model> &model, int &maxRetries);
+    void operator()(plug_data_t &&plugData);
 
 private:
   union connector_t {

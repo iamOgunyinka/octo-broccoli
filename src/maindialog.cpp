@@ -20,6 +20,7 @@
 #include "qcustomplot.h"
 #include "websocket_manager.hpp"
 #include "single_trader.hpp"
+#include "double_trader.hpp"
 
 namespace korrelator {
 
@@ -146,6 +147,9 @@ MainDialog::MainDialog(
 
   ui->restartTickCombo->addItems(
       {"Normal lines", "Ref line", "All lines", "Special"});
+
+  // TODO -> Remove when the feature has been implemented
+  ui->doubleTradeCheck->setEnabled(false);
 
   registerCustomTypes();
   populateUIComponents();
@@ -841,6 +845,7 @@ void MainDialog::saveAppConfigToFile() {
     return;
 
   QJsonObject rootObject;
+  rootObject["doubleTrade"] = ui->doubleTradeCheck->isChecked();
   rootObject["umbral"] = ui->umbralLine->text().trimmed().toDouble();
   rootObject["graphThickness"] = ui->graphThicknessCombo->currentText().toInt();
   rootObject["maxRetries"] = ui->maxRetriesLine->text().trimmed().toInt();
@@ -936,6 +941,9 @@ void MainDialog::readAppConfigFromFile() {
 
       auto const umbral = jsonObject.value("umbral").toDouble();
       ui->umbralLine->setText(QString::number(umbral));
+
+      auto const doubleTradeChecked = jsonObject.value("doubleTrade").toBool(false);
+      ui->doubleTradeCheck->setChecked(doubleTradeChecked);
 
       auto const graphThickness =
           std::clamp(jsonObject.value("graphThickness").toInt(), 1, 5);
@@ -1836,9 +1844,11 @@ void MainDialog::tradeExchangeTokens(
     std::function<void()> refreshModel,
     korrelator::waitable_container_t<korrelator::plug_data_t>& tokenPlugs,
     std::unique_ptr<korrelator::order_model> &model,
-    int &maxRetries) {
-
-  korrelator::SingleTrader singleTrade(refreshModel, model, maxRetries);
+    int &maxRetries)
+{
+  using single_double_trade_t = std::variant<korrelator::single_trader_t,
+    korrelator::double_trader_t>;
+  korrelator::single_trader_t singleTrade(refreshModel, model, maxRetries);
   while (true) {
     auto tradeMetadata = tokenPlugs.get();
     if (tradeMetadata.tradeType == trade_type_e::unknown)

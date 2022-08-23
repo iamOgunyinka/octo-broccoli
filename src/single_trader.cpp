@@ -7,15 +7,15 @@
 
 namespace korrelator {
 
-  SingleTrader::SingleTrader(std::function<void()> refreshModelCallback,
-                             std::unique_ptr<order_model> &model, int &maxRetries):
+  single_trader_t::single_trader_t(std::function<void()> refreshModelCallback,
+                                   std::unique_ptr<order_model> &model, int &maxRetries):
     m_ioContext(getExchangeIOContext()), m_sslContext(getSSLContext()),
     m_maxRetries(maxRetries), m_model(model),
     m_modelRefreshCallback(refreshModelCallback)
   {
   }
 
-  void SingleTrader::operator()(plug_data_t &&tradeMetadata) {
+  void single_trader_t::operator()(plug_data_t &&tradeMetadata) {
     model_data_t* modelData = nullptr;
 
     if (m_model)

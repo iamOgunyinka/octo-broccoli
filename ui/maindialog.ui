@@ -14,27 +14,21 @@
    <string/>
   </property>
   <layout class="QGridLayout" name="gridLayout_2">
-   <item row="1" column="2">
-    <spacer name="horizontalSpacer">
-     <property name="orientation">
-      <enum>Qt::Horizontal</enum>
+   <item row="1" column="0" colspan="2">
+    <widget class="QCheckBox" name="liveTradeCheckbox">
+     <property name="text">
+      <string>Live trade</string>
      </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>642</width>
-       <height>20</height>
-      </size>
-     </property>
-    </spacer>
+    </widget>
    </item>
-   <item row="1" column="3">
+   <item row="1" column="4">
     <widget class="QPushButton" name="startButton">
      <property name="text">
       <string>Start</string>
      </property>
     </widget>
    </item>
-   <item row="0" column="0" colspan="4">
+   <item row="0" column="0" colspan="5">
     <widget class="QSplitter" name="splitter_2">
      <property name="orientation">
       <enum>Qt::Vertical</enum>
@@ -282,10 +276,23 @@
      </widget>
     </widget>
    </item>
-   <item row="1" column="0" colspan="2">
-    <widget class="QCheckBox" name="liveTradeCheckbox">
+   <item row="1" column="3">
+    <spacer name="horizontalSpacer">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>642</width>
+       <height>20</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item row="1" column="2">
+    <widget class="QCheckBox" name="doubleTradeCheck">
      <property name="text">
-      <string>Live trade</string>
+      <string>Double trade</string>
      </property>
     </widget>
    </item>
