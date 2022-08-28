@@ -172,13 +172,23 @@ private:
 
   void sendExchangeRequest(const korrelator::model_data_t &,
                            exchange_name_e const, trade_type_e const tradeType,
-                           korrelator::cross_over_data_t const &);
+                           korrelator::trade_action_e const, double const);
+  korrelator::trade_config_data_t* getTradeInfo(
+      exchange_name_e const exchange, trade_type_e const tradeType,
+      korrelator::trade_action_e const action, QString const &symbol);
+  bool onSingleTradeInfoGenerated(korrelator::trade_config_data_t*,
+                                  korrelator::api_data_t const &apiInfo,
+                                  double const openPrice);
+  void onDoubleTradeInfoGenerated(korrelator::trade_config_data_t *tradeConfigPtr,
+                                  korrelator::api_data_t const &apiInfo,
+                                  double const openPrice);
   static void updatePlottingKey(korrelator::waitable_container_t<double>&,
                                 QCustomPlot* customPlot, double& maxVisiblePlot);
   static void tradeExchangeTokens(
       std::function<void()> refreshModel,
       korrelator::waitable_container_t<korrelator::plug_data_t>&,
-      std::unique_ptr<korrelator::order_model>&, int &maxRetries);
+      std::unique_ptr<korrelator::order_model>&, int& maxRetries,
+      int& expectedTradeCount);
 
 private:
   Ui::MainDialog *ui;
@@ -207,6 +217,7 @@ private:
   double m_maxVisiblePlot = 100.0;
 
   int m_maxOrderRetries = 10;
+  int m_expectedTradeCount = 1; // max 2
 
   bool m_doingAutoLDClosure = false; // automatic "line distance" (LD) closure
   bool m_doingManualLDClosure = false; // manualInterval LD closure

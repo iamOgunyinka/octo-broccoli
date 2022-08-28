@@ -32,7 +32,7 @@ class double_trader_t {
 public:
     double_trader_t(std::function<void()> refreshModel,
                  std::unique_ptr<order_model> &model, int &maxRetries);
-    void operator()(plug_data_t &&plugData);
+    void operator()(plug_data_t &&firstMetaData, plug_data_t &&secondMetadata);
 
 private:
   union connector_t {

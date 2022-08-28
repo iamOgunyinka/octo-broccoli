@@ -1,6 +1,7 @@
 #include "maindialog.hpp"
 #include "ui_maindialog.h"
 
+#include <QCloseEvent>
 #include <QFileDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -8,19 +9,18 @@
 #include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QCloseEvent>
 #include <set>
 
 #include "binance_symbols.hpp"
 #include "constants.hpp"
 #include "container.hpp"
+#include "double_trader.hpp"
 #include "ftx_symbols.hpp"
 #include "kucoin_symbols.hpp"
 #include "order_model.hpp"
 #include "qcustomplot.h"
-#include "websocket_manager.hpp"
 #include "single_trader.hpp"
-#include "double_trader.hpp"
+#include "websocket_manager.hpp"
 
 namespace korrelator {
 
@@ -99,7 +99,7 @@ void token_t::reset() {
   calculatingNewMinMax = true;
   pricePrecision = quantityPrecision = baseAssetPrecision = quotePrecision = -1;
   minPrice = prevNormalizedPrice = CMAX_DOUBLE_VALUE;
-  maxPrice = - (CMAX_DOUBLE_VALUE);
+  maxPrice = -(CMAX_DOUBLE_VALUE);
   alpha = 1.0;
   baseMinSize = 0.0;
   quoteMinSize = 0.0;
@@ -112,10 +112,8 @@ void token_t::reset() {
   crossOver.reset();
 }
 
-symbol_fetcher_t::symbol_fetcher_t():
-    binance{nullptr}, kucoin{nullptr}, ftx{nullptr}
-{
-}
+symbol_fetcher_t::symbol_fetcher_t()
+    : binance{nullptr}, kucoin{nullptr}, ftx{nullptr} {}
 
 symbol_fetcher_t::~symbol_fetcher_t() {
   binance.reset();
@@ -124,14 +122,12 @@ symbol_fetcher_t::~symbol_fetcher_t() {
 
 } // namespace korrelator
 
-MainDialog::MainDialog(
-    bool &warnOnExit,
-    std::filesystem::path const configDirectory,
-    QWidget *parent)
+MainDialog::MainDialog(bool &warnOnExit,
+                       std::filesystem::path const configDirectory,
+                       QWidget *parent)
     : QDialog(parent), ui(new Ui::MainDialog), m_websocket(nullptr),
-    m_legendLayout(nullptr), m_configDirectory(configDirectory),
-    m_warnOnExit(warnOnExit)
-{
+      m_legendLayout(nullptr), m_configDirectory(configDirectory),
+      m_warnOnExit(warnOnExit) {
 
   ui->setupUi(this);
 
@@ -148,9 +144,6 @@ MainDialog::MainDialog(
   ui->restartTickCombo->addItems(
       {"Normal lines", "Ref line", "All lines", "Special"});
 
-  // TODO -> Remove when the feature has been implemented
-  ui->doubleTradeCheck->setEnabled(false);
-
   registerCustomTypes();
   populateUIComponents();
   connectAllUISignals();
@@ -165,19 +158,15 @@ MainDialog::MainDialog(
                              "button to add new API information");
   }
 
-  std::thread{
-    [this] {
-      auto cb = [this]{ refreshModel(); };
-      tradeExchangeTokens(std::move(cb), m_tokenPlugs, m_model,
-                          this->m_maxOrderRetries);
-    }
-  }.detach();
+  std::thread{[this] {
+    auto cb = [this] { refreshModel(); };
+    tradeExchangeTokens(std::move(cb), m_tokenPlugs, m_model, m_maxOrderRetries,
+                        m_expectedTradeCount);
+  }}.detach();
 
-  std::thread{
-    [this] {
-      updatePlottingKey(m_graphKeys, ui->customPlot, m_maxVisiblePlot);
-    }
-  }.detach();
+  std::thread{[this] {
+    updatePlottingKey(m_graphKeys, ui->customPlot, m_maxVisiblePlot);
+  }}.detach();
 
   QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
     for (auto const &exchange :
@@ -189,7 +178,8 @@ MainDialog::MainDialog(
 }
 
 void MainDialog::connectRestartTickSignal() {
-  auto getValue = [this](int const index) ->std::optional<korrelator::rot_metadata_t> {
+  auto getValue =
+      [this](int const index) -> std::optional<korrelator::rot_metadata_t> {
     if (index == 0)
       return m_restartTickValues.normalLines;
     else if (index == 1)
@@ -199,18 +189,20 @@ void MainDialog::connectRestartTickSignal() {
     return std::nullopt; // should almost never happen
   };
 
-  auto displayValuesInGUI = [this](std::optional<korrelator::rot_metadata_t> const &rotMetadata) {
-    if (!rotMetadata.has_value())
-      return;
-    if (rotMetadata->restartOnTickEntry != 0.0)
-      ui->restartTickLine->setText(QString::number(rotMetadata->restartOnTickEntry));
+  auto displayValuesInGUI =
+      [this](std::optional<korrelator::rot_metadata_t> const &rotMetadata) {
+        if (!rotMetadata.has_value())
+          return;
+        if (rotMetadata->restartOnTickEntry != 0.0)
+          ui->restartTickLine->setText(
+              QString::number(rotMetadata->restartOnTickEntry));
 
-    if (auto const value = rotMetadata->percentageEntry; value != 0.0)
-      ui->resetPercentageLine->setText(QString::number(value));
+        if (auto const value = rotMetadata->percentageEntry; value != 0.0)
+          ui->resetPercentageLine->setText(QString::number(value));
 
-    if (auto const value = rotMetadata->specialEntry; value != 0.0)
-      ui->specialLine->setText(QString::number(value));
-  };
+        if (auto const value = rotMetadata->specialEntry; value != 0.0)
+          ui->specialLine->setText(QString::number(value));
+      };
 
   QObject::connect(
       ui->restartTickCombo,
@@ -237,10 +229,10 @@ MainDialog::~MainDialog() {
   delete ui;
 }
 
-void MainDialog::closeEvent(QCloseEvent* closeEvent) {
+void MainDialog::closeEvent(QCloseEvent *closeEvent) {
   if (m_warnOnExit && m_programIsRunning) {
     auto const response = QMessageBox::question(
-          this, tr("Close"), tr("Are you sure you want to close this window?"));
+        this, tr("Close"), tr("Are you sure you want to close this window?"));
     if (response == QMessageBox::No)
       return closeEvent->ignore();
   }
@@ -310,7 +302,7 @@ void MainDialog::populateUIComponents() {
 }
 
 bool MainDialog::setRestartTickRowValues(
-      std::optional<korrelator::rot_metadata_t> &optValue) {
+    std::optional<korrelator::rot_metadata_t> &optValue) {
   auto const optRestartValue = getIntegralValue(ui->restartTickLine);
   auto const optPercentage = getIntegralValue(ui->resetPercentageLine);
   auto const optSpecialEntry = getIntegralValue(ui->specialLine);
@@ -320,10 +312,10 @@ bool MainDialog::setRestartTickRowValues(
     return false;
   }
 
-  auto& v = optValue.emplace();
+  auto &v = optValue.emplace();
   v.restartOnTickEntry = *optRestartValue;
   v.percentageEntry = v.specialEntry = v.afterDivisionPercentageEntry =
-       v.afterDivisionSpecialEntry = 0.0;
+      v.afterDivisionSpecialEntry = 0.0;
   if (optPercentage.has_value())
     v.percentageEntry = *optPercentage;
   if (optSpecialEntry.has_value())
@@ -373,6 +365,14 @@ void MainDialog::connectAllUISignals() {
         getSpotsTokens(exchange);
         getFuturesTokens(exchange);
       });
+  QObject::connect(ui->doubleTradeCheck, &QCheckBox::toggled, this,
+                   [this](bool const checked)
+  {
+    if (checked)
+      m_expectedTradeCount = 2;
+    else
+      m_expectedTradeCount = 1;
+  });
   ui->exchangeCombo->addItems({"Binance", "FTX", "KuCoin"});
 
   QObject::connect(ui->applySpecialButton, &QPushButton::clicked, this,
@@ -475,8 +475,10 @@ void MainDialog::onNewOrderDetected(korrelator::cross_over_data_t crossOver,
   if (m_model)
     m_model->AddData(modelData);
 
-  if (ui->liveTradeCheckbox->isChecked() && !m_apiTradeApiMap.empty())
-    sendExchangeRequest(modelData, exchange, tradeType, crossOver);
+  if (ui->liveTradeCheckbox->isChecked() && !m_apiTradeApiMap.empty()) {
+    sendExchangeRequest(modelData, exchange, tradeType, crossOver.action,
+                        crossOver.openPrice);
+  }
   generateJsonFile(modelData);
 }
 
@@ -821,9 +823,8 @@ void MainDialog::getExchangeInfo(exchange_name_e const exchange,
   }
 }
 
-QJsonObject getJsonObjectFromRot(
-        korrelator::rot_metadata_t const &v, QString const &name)
-{
+QJsonObject getJsonObjectFromRot(korrelator::rot_metadata_t const &v,
+                                 QString const &name) {
   QJsonObject result;
   result["name"] = name;
   result["specialV"] = QString::number(v.specialEntry);
@@ -838,7 +839,8 @@ void MainDialog::saveAppConfigToFile() {
   if (ui->tokenListWidget->count() == 0)
     return;
 
-  auto const filenameFs = m_configDirectory / korrelator::constants::app_json_filename;
+  auto const filenameFs =
+      m_configDirectory / korrelator::constants::app_json_filename;
   auto const filename = filenameFs.string();
   QFile file{filename.c_str()};
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
@@ -853,13 +855,13 @@ void MainDialog::saveAppConfigToFile() {
 
   {
     QJsonArray jsonTicks;
-    if (auto& special = m_restartTickValues.special; special.has_value())
+    if (auto &special = m_restartTickValues.special; special.has_value())
       jsonTicks.append(getJsonObjectFromRot(*special, "Special"));
 
-    if (auto& value = m_restartTickValues.normalLines; value.has_value())
+    if (auto &value = m_restartTickValues.normalLines; value.has_value())
       jsonTicks.append(getJsonObjectFromRot(*value, "normalLine"));
 
-    if (auto& ref = m_restartTickValues.refLines; ref.has_value())
+    if (auto &ref = m_restartTickValues.refLines; ref.has_value())
       jsonTicks.append(getJsonObjectFromRot(*ref, "refLine"));
 
     if (!jsonTicks.isEmpty())
@@ -942,8 +944,10 @@ void MainDialog::readAppConfigFromFile() {
       auto const umbral = jsonObject.value("umbral").toDouble();
       ui->umbralLine->setText(QString::number(umbral));
 
-      auto const doubleTradeChecked = jsonObject.value("doubleTrade").toBool(false);
+      auto const doubleTradeChecked =
+          jsonObject.value("doubleTrade").toBool(false);
       ui->doubleTradeCheck->setChecked(doubleTradeChecked);
+      m_expectedTradeCount = doubleTradeChecked ? 2 : 1;
 
       auto const graphThickness =
           std::clamp(jsonObject.value("graphThickness").toInt(), 1, 5);
@@ -1012,7 +1016,8 @@ void MainDialog::readTradesConfigFromFile() {
 
   {
     auto const filename =
-        (m_configDirectory / korrelator::constants::trade_json_filename).string();
+        (m_configDirectory / korrelator::constants::trade_json_filename)
+            .string();
     QFile file(filename.c_str());
     if (!file.exists() || !file.open(QIODevice::ReadOnly))
       return;
@@ -1028,11 +1033,13 @@ void MainDialog::readTradesConfigFromFile() {
 
   m_tradeConfigDataList.clear();
   auto const objectKeys = jsonObject.keys();
+
   for (int i = 0; i < objectKeys.size(); ++i) {
     auto const &key = objectKeys[i];
     auto const exchange = korrelator::stringToExchangeName(key);
     if (exchange == exchange_name_e::none)
       continue;
+
     auto const dataList = jsonObject.value(key).toArray();
     for (int i = 0; i < dataList.size(); ++i) {
       auto const object = dataList[i].toObject();
@@ -1091,10 +1098,67 @@ void MainDialog::readTradesConfigFromFile() {
           continue;
         }
       }
+      data.tradeID = object.value("id").toInt();
+      data.friendForID = object.value("friendID").toInt();
 
       if (data.tradeType == trade_type_e::futures)
         data.leverage = object.value("leverage").toInt();
       m_tradeConfigDataList.push_back(std::move(data));
+    }
+  }
+
+  // add tradeID to all trades without prior ID
+  for (auto& tradeData: m_tradeConfigDataList) {
+    if (tradeData.tradeID == 0) {
+      auto const iter = std::max_element(m_tradeConfigDataList.cbegin(),
+                                         m_tradeConfigDataList.cend(),
+                                         [](auto const &data1, auto const &data2)
+      {
+          return data1.tradeID < data2.tradeID;
+      });
+      tradeData.tradeID = iter->tradeID + 1;
+    }
+  }
+
+  // validate the friends side of things
+  for (auto const &tradeData: m_tradeConfigDataList) {
+    if (tradeData.friendForID == 0)
+      continue;
+
+    auto findIiter = std::find_if(m_tradeConfigDataList.cbegin(),
+                                  m_tradeConfigDataList.cend(),
+                                  [id = tradeData.friendForID](auto const &tradeData)
+    {
+      return id == tradeData.tradeID;
+    });
+    if (findIiter == m_tradeConfigDataList.cend()) { // the friend specified is not found
+      QMessageBox::critical(
+            this, tr("Error"),
+            tr("The friend specified for tradeID %1 is not found")
+            .arg(tradeData.tradeID));
+      return m_tradeConfigDataList.clear();
+    }
+    auto const &friendTradeData = *findIiter;
+    // a friend should have an opposite trade type
+    // i.e spot trade should be friends with futures trade and vice versa
+    if (friendTradeData.tradeType == tradeData.tradeType) {
+      QMessageBox::critical(
+            this, tr("Error"),
+            tr("In trade with iD: %1, a %2 trade should only be friends with %3 trade")
+            .arg(tradeData.tradeID)
+            .arg((tradeData.tradeType == trade_type_e::spot ? "spot": "futures"))
+            // display the opposite
+            .arg((tradeData.tradeType != trade_type_e::spot ? "spot": "futures")));;
+      return m_tradeConfigDataList.clear();
+    }
+
+    if (friendTradeData.side == tradeData.side) {
+      QMessageBox::critical(
+            this, tr("Error"),
+            tr("In trade with id %1, the sides (BUY/SELL) for the trade"
+               " should be opposites BUY->SELL, SELL->BUY")
+            .arg(tradeData.tradeID));
+      return m_tradeConfigDataList.clear();
     }
   }
 
@@ -1287,28 +1351,33 @@ std::optional<double> MainDialog::getIntegralValue(QLineEdit *lineEdit) {
 }
 
 bool MainDialog::validateUserInput() {
-  if (auto const maxRetries = getIntegralValue(ui->maxRetriesLine); maxRetries.has_value()) {
+  if (auto const maxRetries = getIntegralValue(ui->maxRetriesLine);
+      maxRetries.has_value()) {
     if (*maxRetries == 0.0)
       m_maxOrderRetries = 10;
     else
       m_maxOrderRetries = *maxRetries;
-  } else return false;
+  } else
+    return false;
 
   m_doingAutoLDClosure = false;
   if (m_restartTickValues.special.has_value()) {
-    m_doingManualLDClosure = m_restartTickValues.special->restartOnTickEntry != 0.0;
+    m_doingManualLDClosure =
+        m_restartTickValues.special->restartOnTickEntry != 0.0;
     m_doingAutoLDClosure =
-      m_restartTickValues.special->percentageEntry != 0.0 &&
-      m_restartTickValues.special->specialEntry != 0.0;
+        m_restartTickValues.special->percentageEntry != 0.0 &&
+        m_restartTickValues.special->specialEntry != 0.0;
   }
 
-  if (auto const threshold = getIntegralValue(ui->umbralLine); threshold.has_value()){
+  if (auto const threshold = getIntegralValue(ui->umbralLine);
+      threshold.has_value()) {
     m_threshold = *threshold;
     m_findingUmbral = *threshold != 0.0;
 
     if (m_findingUmbral)
       m_threshold /= 100.0;
-  } else return false;
+  } else
+    return false;
 
   if (m_tokens.size() > 2) {
     QMessageBox::critical(this, tr("Error"), "You can only trade one token");
@@ -1508,8 +1577,9 @@ MainDialog::updateRefGraph(double const keyStart, double const keyEnd,
             (qint64)m_restartTickValues.refLines->restartOnTickEntry;
   } else {
     auto const &specialTickValue = m_restartTickValues.special;
-    refResult.eachTickNormalize = specialTickValue.has_value() &&
-       value.graphPointsDrawnCount >= specialTickValue->restartOnTickEntry;
+    refResult.eachTickNormalize =
+        specialTickValue.has_value() &&
+        value.graphPointsDrawnCount >= specialTickValue->restartOnTickEntry;
   }
 
   if (refResult.isResettingRef || refResult.eachTickNormalize)
@@ -1540,8 +1610,7 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
 
   static char const *const legendDisplayFormat = "%1(%2)";
   double const keyStart =
-      (key >= m_maxVisiblePlot ? (key - m_maxVisiblePlot)
-                                         : 0.0);
+      (key >= m_maxVisiblePlot ? (key - m_maxVisiblePlot) : 0.0);
   auto &refSymbol = m_tokens[0];
   double const prevRef =
       (m_hasReferences) ? refSymbol.normalizedPrice : CMAX_DOUBLE_VALUE;
@@ -1563,10 +1632,9 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     value.prevNormalizedPrice = value.normalizedPrice;
 
   isResettingSymbols =
-      !m_doingManualLDClosure &&
-       m_restartTickValues.normalLines.has_value() &&
-       (value.graphPointsDrawnCount >=
-        (qint64)m_restartTickValues.normalLines->restartOnTickEntry);
+      !m_doingManualLDClosure && m_restartTickValues.normalLines.has_value() &&
+      (value.graphPointsDrawnCount >=
+       (qint64)m_restartTickValues.normalLines->restartOnTickEntry);
 
   if (isResettingSymbols)
     value.graphPointsDrawnCount = 0;
@@ -1619,7 +1687,8 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     auto const distanceThreshold =
         m_restartTickValues.special->afterDivisionSpecialEntry; // b
     bool const resettingRef =
-        m_doingAutoLDClosure && distanceFromRefToSymbol >
+        m_doingAutoLDClosure &&
+        distanceFromRefToSymbol >
             m_restartTickValues.special->afterDivisionPercentageEntry;
 
     if (refResult.eachTickNormalize || resettingRef) {
@@ -1672,14 +1741,13 @@ void MainDialog::onTimerTick() {
 }
 
 void MainDialog::updatePlottingKey(
-    korrelator::waitable_container_t<double>& graphKeys,
-    QCustomPlot* customPlot, double& maxVisiblePlot) {
+    korrelator::waitable_container_t<double> &graphKeys,
+    QCustomPlot *customPlot, double &maxVisiblePlot) {
   while (true) {
     auto const key = graphKeys.get();
     // make `key` axis range scroll right with the data at a
     // constant range of `maxVisiblePlot`, set by the user
-    customPlot->xAxis->setRange(key, maxVisiblePlot,
-                                Qt::AlignRight);
+    customPlot->xAxis->setRange(key, maxVisiblePlot, Qt::AlignRight);
     customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
   }
 }
@@ -1725,8 +1793,8 @@ void MainDialog::generateJsonFile(korrelator::model_data_t const &modelData) {
 }
 
 void MainDialog::onSettingsDialogClicked() {
-  auto dialog = new SettingsDialog{
-      m_configDirectory.string(), this->windowTitle(), this};
+  auto dialog =
+      new SettingsDialog{m_configDirectory.string(), this->windowTitle(), this};
   QObject::connect(dialog, &SettingsDialog::finished, this,
                    [this, dialog] { m_apiTradeApiMap = dialog->apiDataMap(); });
   QObject::connect(dialog, &SettingsDialog::finished, dialog,
@@ -1734,21 +1802,35 @@ void MainDialog::onSettingsDialogClicked() {
   dialog->open();
 }
 
-void MainDialog::sendExchangeRequest(
-    korrelator::model_data_t const &modelData, exchange_name_e const exchange,
-    trade_type_e const tradeType,
-    korrelator::cross_over_data_t const &crossOver) {
-  auto iter = m_apiTradeApiMap.find(exchange);
-  if (iter == m_apiTradeApiMap.end())
-    return;
+korrelator::plug_data_t createPlugData(
+  korrelator::trade_config_data_t *tradeConfigPtr,
+  korrelator::api_data_t const &apiInfo,
+  double const openPrice) {
 
+  korrelator::plug_data_t data;
+  data.exchange = tradeConfigPtr->exchange;
+  data.tradeConfig = tradeConfigPtr;
+  data.apiInfo = apiInfo;
+  data.tradeType = tradeConfigPtr->tradeType;
+  data.currentTime = std::time(nullptr);
+  data.tokenPrice = openPrice;
+  data.multiplier = tradeConfigPtr->multiplier;
+  data.tickSize = tradeConfigPtr->tickSize;
+  return data;
+}
+
+korrelator::trade_config_data_t* MainDialog::getTradeInfo(
+    exchange_name_e const exchange, trade_type_e const tradeType,
+    korrelator::trade_action_e const action,
+    QString const &symbol)
+{
   if (!m_tradeConfigDataList.empty() &&
       m_tradeConfigDataList[0].pricePrecision == -1)
     updateTradeConfigurationPrecisions();
 
   auto configIterPair = std::equal_range(
       m_tradeConfigDataList.begin(), m_tradeConfigDataList.end(), exchange,
-      [symbol = modelData.symbol.toLower()](auto const &a, auto const &b) {
+      [symbol](auto const &a, auto const &b) {
         using a_type = std::decay_t<std::remove_cv_t<decltype(a)>>;
         if constexpr (std::is_same_v<exchange_name_e, a_type>)
           return std::tie(a, symbol) <
@@ -1761,10 +1843,10 @@ void MainDialog::sendExchangeRequest(
   auto modelDataPtr = m_model->front();
   if (configIterPair.first == configIterPair.second) {
     modelDataPtr->remark = "Token pair or exchange not found";
-    return;
+    return nullptr;
   }
 
-  std::vector<korrelator::trade_config_data_t *> tradeConfigPtrs;
+  std::vector<korrelator::trade_config_data_t*> tradeConfigPtrs;
   for (auto iter = configIterPair.first; iter != configIterPair.second;
        ++iter) {
     if (tradeType == iter->tradeType)
@@ -1773,7 +1855,7 @@ void MainDialog::sendExchangeRequest(
 
   if (tradeConfigPtrs.empty()) {
     modelDataPtr->remark = "Cannot find tradeType of this account";
-    return;
+    return nullptr;
   }
 
   if (tradeConfigPtrs.size() == 1) {
@@ -1792,7 +1874,7 @@ void MainDialog::sendExchangeRequest(
                            tradeConfigPtrs[0]->symbol +
                            " that exceeds BUY and SELL."
                            " Please check for duplicates.";
-    return;
+    return nullptr;
   }
 
   if (!tradeConfigPtrs[0]->oppositeSide || !tradeConfigPtrs[1]->oppositeSide) {
@@ -1802,57 +1884,134 @@ void MainDialog::sendExchangeRequest(
 
   korrelator::trade_config_data_t *tradeConfigPtr = nullptr;
   for (auto &tradeConfig : tradeConfigPtrs) {
-    if (crossOver.action == tradeConfig->side) {
+    if (action == tradeConfig->side) {
       tradeConfigPtr = tradeConfig;
       break;
     }
   }
 
-  if (!tradeConfigPtr) {
-    modelDataPtr->remark =
-        "Trade configuration was not found for this token/side";
-    return;
-  }
+  if (!tradeConfigPtr)
+    modelDataPtr->remark = "Trade configuration was not found for this token/side";
+  return tradeConfigPtr;
+}
 
-  auto &apiInfo = *iter;
-  korrelator::plug_data_t data;
-  data.exchange = exchange;
-  data.tradeConfig = tradeConfigPtr;
-  data.apiInfo = apiInfo;
-  data.tradeType = tradeType;
-  data.currentTime = std::time(nullptr);
-  data.tokenPrice = crossOver.openPrice;
-  data.multiplier = tradeConfigPtr->multiplier;
-  data.tickSize = tradeConfigPtr->tickSize;
-  bool const isFutures = tradeType == trade_type_e::futures;
+bool MainDialog::onSingleTradeInfoGenerated(
+    korrelator::trade_config_data_t *tradeConfigPtr,
+    korrelator::api_data_t const &apiInfo,
+    double const openPrice) {
+
+  auto data = createPlugData(tradeConfigPtr, apiInfo, openPrice);
+  bool const isFutures = tradeConfigPtr->tradeType == trade_type_e::futures;
 
   if ((!isFutures && !apiInfo.spotApiKey.isEmpty()) ||
       (isFutures && !apiInfo.futuresApiKey.isEmpty())) {
-    switch (exchange) {
+    switch (tradeConfigPtr->exchange) {
     case exchange_name_e::binance:
     case exchange_name_e::ftx:
     case exchange_name_e::kucoin:
-      return m_tokenPlugs.append(std::move(data));
+      m_tokenPlugs.append(std::move(data));
+      return true;
     default:
       break;
     }
   }
-  modelDataPtr->remark = "Internal program error";
+
+  return false;
+}
+
+void MainDialog::onDoubleTradeInfoGenerated(
+    korrelator::trade_config_data_t *firstTradeConfigPtr,
+    korrelator::api_data_t const &apiInfo,
+    double const openPrice)
+{
+  auto iter =
+      std::find_if(m_tradeConfigDataList.cbegin(), m_tradeConfigDataList.cend(),
+                   [id = firstTradeConfigPtr->friendForID](auto const & tradeData)
+  {
+    return tradeData.tradeID == id;
+  });
+
+  if (iter == m_tradeConfigDataList.cend()) {
+    auto modelDataPtr = m_model->front();
+    modelDataPtr->remark = "Unable to find second pair to trade with";
+    return;
+  }
+
+  auto secondTradeConfig = getTradeInfo(iter->exchange, iter->tradeType, iter->side,
+                                        iter->symbol.toLower());
+  if (!secondTradeConfig)
+    return;
+
+  auto data1 = createPlugData(firstTradeConfigPtr, apiInfo, openPrice);
+  auto data2 = createPlugData(secondTradeConfig, apiInfo, openPrice);
+
+  bool const isFutures = data1.tradeType == trade_type_e::futures;
+
+  if ((!isFutures && !apiInfo.spotApiKey.isEmpty()) ||
+      (isFutures && !apiInfo.futuresApiKey.isEmpty())) {
+    switch (data1.exchange) {
+    case exchange_name_e::binance:
+    case exchange_name_e::ftx:
+    case exchange_name_e::kucoin:
+      m_tokenPlugs.append(std::move(data1));
+      m_tokenPlugs.append(std::move(data2));
+    default:
+      break;
+    }
+  }
+}
+
+void MainDialog::sendExchangeRequest(
+    korrelator::model_data_t const &modelData,
+    exchange_name_e const exchange,
+    trade_type_e const tradeType,
+    korrelator::trade_action_e const action,
+    double const openPrice)
+{
+  auto iter = m_apiTradeApiMap.find(exchange);
+  if (iter == m_apiTradeApiMap.end())
+    return;
+
+  auto tradeConfigPtr =
+    getTradeInfo(exchange, tradeType, action, modelData.symbol.toLower());
+  if (!tradeConfigPtr)
+    return;
+
+  auto modelDataPtr = m_model->front();
+  if (m_expectedTradeCount == 1) {
+    if (!onSingleTradeInfoGenerated(tradeConfigPtr, *iter, openPrice)) {
+      modelDataPtr->remark = "Internal program error";
+    }
+    return;
+  }
+
+  onDoubleTradeInfoGenerated(tradeConfigPtr, *iter, openPrice);
 }
 
 void MainDialog::tradeExchangeTokens(
-    std::function<void()> refreshModel,
-    korrelator::waitable_container_t<korrelator::plug_data_t>& tokenPlugs,
-    std::unique_ptr<korrelator::order_model> &model,
-    int &maxRetries)
+    std::function<void()> refreshModelCallback,
+    korrelator::waitable_container_t<korrelator::plug_data_t> &tokenPlugs,
+    std::unique_ptr<korrelator::order_model> &model, int &maxRetries,
+    int &expectedTradeCount)
 {
-  using single_double_trade_t = std::variant<korrelator::single_trader_t,
-    korrelator::double_trader_t>;
-  korrelator::single_trader_t singleTrade(refreshModel, model, maxRetries);
+  korrelator::single_trader_t singleTrade(refreshModelCallback, model,
+                                          maxRetries);
+  korrelator::double_trader_t doubleTrade(refreshModelCallback, model,
+                                          maxRetries);
+
+  korrelator::plug_data_t firstMetadata;
+  korrelator::plug_data_t secondMetadata;
+
   while (true) {
-    auto tradeMetadata = tokenPlugs.get();
-    if (tradeMetadata.tradeType == trade_type_e::unknown)
+    firstMetadata = tokenPlugs.get();
+    if (firstMetadata.tradeType == trade_type_e::unknown)
       tokenPlugs.clear();
-    singleTrade(std::move(tradeMetadata));
+
+    if (1 == expectedTradeCount) {
+      singleTrade(std::move(firstMetadata));
+    } else if (2 == expectedTradeCount) {
+      secondMetadata = tokenPlugs.get();
+      doubleTrade(std::move(firstMetadata), std::move(secondMetadata));
+    }
   }
 }

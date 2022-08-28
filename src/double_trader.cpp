@@ -15,9 +15,10 @@ double_trader_t::double_trader_t(std::function<void()> refreshModelCallback,
 {
 }
 
-void double_trader_t::operator()(plug_data_t &&tradeMetadata) {
+void double_trader_t::operator()(
+    plug_data_t &&firstMetadata, plug_data_t &&secondMetadata) {
   // only when program is stopped
-  if (tradeMetadata.tradeType == trade_type_e::unknown) {
+  if (firstMetadata.tradeType == trade_type_e::unknown) {
     m_lastQuantity = NAN;
     m_futuresLeverageIsSet = false;
     m_isFirstTrade = true;
@@ -27,7 +28,7 @@ void double_trader_t::operator()(plug_data_t &&tradeMetadata) {
   }
 
   model_data_t* modelData = nullptr;
-  auto tradeCopy = tradeMetadata;
+  auto& tradeCopy = secondMetadata;
 
   if (tradeCopy.tradeType == trade_type_e::futures)
     tradeCopy.tradeType = trade_type_e::spot;
