@@ -41,11 +41,15 @@ private:
     ftx_trader* ftxTrader;
   };
 
+  void initiateTrading(plug_data_t const &, connector_t&);
+  void cleanupTradingData(plug_data_t const &, connector_t&);
+
   net::io_context& m_ioContext;
   net::ssl::context& m_sslContext;
   int& m_maxRetries;
   std::unique_ptr<order_model>& m_model;
   std::function<void()> m_modelRefreshCallback = nullptr;
+
   trade_action_e m_lastAction = trade_action_e::nothing;
   double m_lastQuantity = NAN;
   bool m_futuresLeverageIsSet = false;

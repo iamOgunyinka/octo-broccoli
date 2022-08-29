@@ -170,7 +170,7 @@ private:
                                                     double const keyEnd,
                                                     bool const updateGraph);
 
-  void sendExchangeRequest(const korrelator::model_data_t &,
+  void sendExchangeRequest(korrelator::model_data_t &,
                            exchange_name_e const, trade_type_e const tradeType,
                            korrelator::trade_action_e const, double const);
   korrelator::trade_config_data_t* getTradeInfo(

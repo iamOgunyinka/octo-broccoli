@@ -120,6 +120,12 @@ symbol_fetcher_t::~symbol_fetcher_t() {
   kucoin.reset();
 }
 
+bool hasValidExchange(exchange_name_e const exchange) {
+  return exchange == exchange_name_e::binance ||
+      exchange_name_e::ftx == exchange ||
+      exchange_name_e::kucoin == exchange;
+}
+
 } // namespace korrelator
 
 MainDialog::MainDialog(bool &warnOnExit,
@@ -472,13 +478,26 @@ void MainDialog::onNewOrderDetected(korrelator::cross_over_data_t crossOver,
 
   modelData.side = korrelator::actionTypeToString(currentAction);
   modelData.exchange = korrelator::exchangeNameToString(exchange);
+  modelData.userOrderID = QString::number(QRandomGenerator::global()->generate());
+
   if (m_model)
     m_model->AddData(modelData);
+  m_model->front()->friendModel = nullptr;
 
   if (ui->liveTradeCheckbox->isChecked() && !m_apiTradeApiMap.empty()) {
     sendExchangeRequest(modelData, exchange, tradeType, crossOver.action,
                         crossOver.openPrice);
+    if (m_model) {
+      auto const &modelDataPtr = m_model->front();
+      if (modelDataPtr && modelDataPtr->friendModel) {
+        m_model->AddData(*modelDataPtr->friendModel);
+        delete modelDataPtr->friendModel;
+        modelDataPtr->friendModel = nullptr;
+      }
+      m_model->refreshModel();
+    }
   }
+
   generateJsonFile(modelData);
 }
 
@@ -502,8 +521,7 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->oneOpCheckBox->setEnabled(enabled);
   ui->graphThicknessCombo->setEnabled(enabled);
   ui->maxRetriesLine->setEnabled(enabled);
-  // ui->umbralLine->setEnabled(enabled);
-  // ui->liveTradeCheckbox->setEnabled(enabled);
+  ui->doubleTradeCheck->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {
@@ -852,6 +870,7 @@ void MainDialog::saveAppConfigToFile() {
   rootObject["graphThickness"] = ui->graphThicknessCombo->currentText().toInt();
   rootObject["maxRetries"] = ui->maxRetriesLine->text().trimmed().toInt();
   rootObject["reverse"] = ui->reverseCheckBox->isChecked();
+  rootObject["liveTrade"] = ui->liveTradeCheckbox->isChecked();
 
   {
     QJsonArray jsonTicks;
@@ -959,6 +978,9 @@ void MainDialog::readAppConfigFromFile() {
 
       auto const reverse = jsonObject.value("reverse").toBool(false);
       ui->reverseCheckBox->setChecked(reverse);
+
+      auto const liveTrade = jsonObject.value("liveTrade").toBool(false);
+      ui->liveTradeCheckbox->setChecked(liveTrade);
 
       auto const jsonTicks = jsonObject.value("ticks").toArray();
       ui->restartTickCombo->disconnect(this);
@@ -1847,8 +1869,7 @@ korrelator::trade_config_data_t* MainDialog::getTradeInfo(
   }
 
   std::vector<korrelator::trade_config_data_t*> tradeConfigPtrs;
-  for (auto iter = configIterPair.first; iter != configIterPair.second;
-       ++iter) {
+  for (auto iter = configIterPair.first; iter != configIterPair.second; ++iter) {
     if (tradeType == iter->tradeType)
       tradeConfigPtrs.push_back(&(*iter));
   }
@@ -1895,28 +1916,26 @@ korrelator::trade_config_data_t* MainDialog::getTradeInfo(
   return tradeConfigPtr;
 }
 
+bool apiKeysAvailable(korrelator::plug_data_t const &data,
+                      korrelator::api_data_t const &apiInfo)
+{
+  bool const isFutures = data.tradeType == trade_type_e::futures;
+  return ((!isFutures && !apiInfo.spotApiKey.isEmpty()) ||
+      (isFutures && !apiInfo.futuresApiKey.isEmpty())) &&
+      korrelator::hasValidExchange(data.exchange);
+}
+
 bool MainDialog::onSingleTradeInfoGenerated(
     korrelator::trade_config_data_t *tradeConfigPtr,
     korrelator::api_data_t const &apiInfo,
     double const openPrice) {
 
   auto data = createPlugData(tradeConfigPtr, apiInfo, openPrice);
-  bool const isFutures = tradeConfigPtr->tradeType == trade_type_e::futures;
+  auto const isTradable = apiKeysAvailable(data, apiInfo);
+  if (isTradable)
+    m_tokenPlugs.append(std::move(data));
 
-  if ((!isFutures && !apiInfo.spotApiKey.isEmpty()) ||
-      (isFutures && !apiInfo.futuresApiKey.isEmpty())) {
-    switch (tradeConfigPtr->exchange) {
-    case exchange_name_e::binance:
-    case exchange_name_e::ftx:
-    case exchange_name_e::kucoin:
-      m_tokenPlugs.append(std::move(data));
-      return true;
-    default:
-      break;
-    }
-  }
-
-  return false;
+  return isTradable;
 }
 
 void MainDialog::onDoubleTradeInfoGenerated(
@@ -1931,38 +1950,45 @@ void MainDialog::onDoubleTradeInfoGenerated(
     return tradeData.tradeID == id;
   });
 
+  auto& modelDataPtr = *m_model->front();
+  modelDataPtr.friendModel = new korrelator::model_data_t(modelDataPtr);
+  auto& secondTradeModelData = *modelDataPtr.friendModel;
+  auto& remark = secondTradeModelData.remark;
+
   if (iter == m_tradeConfigDataList.cend()) {
-    auto modelDataPtr = m_model->front();
-    modelDataPtr->remark = "Unable to find second pair to trade with";
+    remark = "Unable to find second pair to trade with";
     return;
   }
 
-  auto secondTradeConfig = getTradeInfo(iter->exchange, iter->tradeType, iter->side,
-                                        iter->symbol.toLower());
+  auto secondTradeConfig =
+      getTradeInfo(iter->exchange, iter->tradeType, iter->side, iter->symbol.toLower());
   if (!secondTradeConfig)
     return;
 
   auto data1 = createPlugData(firstTradeConfigPtr, apiInfo, openPrice);
   auto data2 = createPlugData(secondTradeConfig, apiInfo, openPrice);
+  data1.correlatorID = data2.correlatorID = m_model->front()->userOrderID;
 
-  bool const isFutures = data1.tradeType == trade_type_e::futures;
+  bool const isTradable = apiKeysAvailable(data1, apiInfo) &&
+      apiKeysAvailable(data2, apiInfo);
 
-  if ((!isFutures && !apiInfo.spotApiKey.isEmpty()) ||
-      (isFutures && !apiInfo.futuresApiKey.isEmpty())) {
-    switch (data1.exchange) {
-    case exchange_name_e::binance:
-    case exchange_name_e::ftx:
-    case exchange_name_e::kucoin:
-      m_tokenPlugs.append(std::move(data1));
-      m_tokenPlugs.append(std::move(data2));
-    default:
-      break;
-    }
+  if (!isTradable) {
+    remark = "One of the API keys for the trade is unavailable";
+    modelDataPtr.remark = remark;
+    return;
   }
+
+  secondTradeModelData.side = korrelator::actionTypeToString(data2.tradeConfig->side);
+  secondTradeModelData.symbol = data2.tradeConfig->symbol;
+  secondTradeModelData.marketType =
+      (data2.tradeConfig->tradeType == trade_type_e::spot ? "SPOT" : "FUTURES");
+
+  m_tokenPlugs.append(std::move(data1));
+  m_tokenPlugs.append(std::move(data2));
 }
 
 void MainDialog::sendExchangeRequest(
-    korrelator::model_data_t const &modelData,
+    korrelator::model_data_t &modelData,
     exchange_name_e const exchange,
     trade_type_e const tradeType,
     korrelator::trade_action_e const action,
@@ -1980,7 +2006,7 @@ void MainDialog::sendExchangeRequest(
   auto modelDataPtr = m_model->front();
   if (m_expectedTradeCount == 1) {
     if (!onSingleTradeInfoGenerated(tradeConfigPtr, *iter, openPrice)) {
-      modelDataPtr->remark = "Internal program error";
+      modelDataPtr->remark = "Error: please check that the API keys are correctly set";
     }
     return;
   }

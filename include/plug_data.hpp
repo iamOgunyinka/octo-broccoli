@@ -6,6 +6,7 @@ namespace korrelator {
 
 struct plug_data_t {
   api_data_t apiInfo;
+  QString correlatorID;
   trade_config_data_t *tradeConfig;
   trade_type_e tradeType;
   exchange_name_e exchange;
