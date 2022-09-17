@@ -1,20 +1,46 @@
 QT       += core gui network websockets printsupport
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
-
 CONFIG += c++17
-INCLUDEPATH += "include"
-INCLUDEPATH += "third-party/rapidjson/include"
-INCLUDEPATH += "D:\\boost_1_78\\include" \
-               "D:\\vcpkg\\installed\\x64-windows\\include"
 
-Debug:LIBS += "D:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libcrypto.lib" \
-              "D:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libssl.lib" \
-              "D:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libsodium.lib"
+VCPKG_PATH = D:\\vcpkg\\installed\\x64-windows
+VCPKG_DEBUG_LPATH = $${VCPKG_PATH}\\debug\\lib
+VCPKG_REL_LPATH = $${VCPKG_PATH}\\lib
 
-Release:LIBS += "D:\\vcpkg\\installed\\x64-windows\\lib\\libcrypto.lib" \
-              "D:\\vcpkg\\installed\\x64-windows\\lib\\libssl.lib" \
-              "D:\\vcpkg\\installed\\x64-windows\\lib\\libsodium.lib"
+win32:{
+  INCLUDEPATH += "include" \
+                 "third-party/rapidjson/include" \
+                 "D:\\boost_1_78\\include" \
+                 $${VCPKG_PATH}\\include
+} else {
+
+
+}
+
+
+CONFIG(debug, debug|release):{
+  win32: {
+    LIBS += \
+            $${VCPKG_DEBUG_LPATH}\\libcrypto.lib \
+            $${VCPKG_DEBUG_LPATH}\\libssl.lib \
+            $${VCPKG_DEBUG_LPATH}\\libsodium.lib
+  } else {
+  # intended for any OS other than Windows
+    LIBS +=
+  }
+}
+
+CONFIG(release, debug|release): {
+  win32: {
+    LIBS += $${VCPKG_REL_LPATH}\\libcrypto.lib \
+            $${VCPKG_REL_LPATH}\\libssl.lib \
+            $${VCPKG_REL_LPATH}\\libsodium.lib
+  } else {
+# intended for any OS other than Windows
+    LIBS +=
+  }
+}
+
 
 QMAKE_CXXFLAGS += -bigobj
 # DEFINES += TESTNET=1
