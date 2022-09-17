@@ -181,6 +181,7 @@ MainDialog::MainDialog(bool &warnOnExit,
       getFuturesTokens(exchange);
     }
   });
+  ui->tabWidget->setCurrentWidget(ui->tabSettings);
 }
 
 void MainDialog::connectRestartTickSignal() {
@@ -1457,6 +1458,9 @@ void MainDialog::onOKButtonClicked() {
 
   if (!validateUserInput())
     return;
+
+  if (ui->tabWidget->currentWidget() != ui->tabCharts)
+    ui->tabWidget->setCurrentWidget(ui->tabCharts);
 
   if (!m_firstRun)
     return takeBackToFactoryReset();
