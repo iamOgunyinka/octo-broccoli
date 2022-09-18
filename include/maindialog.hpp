@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QDialog>
-#include <QListWidgetItem>
+#include <QListWidget>
 #include <QMetaType>
 #include <QNetworkAccessManager>
 #include <QTimer>
@@ -192,6 +192,7 @@ private:
 
 private:
   Ui::MainDialog *ui;
+  QListWidget* m_currentListWidget;
   QNetworkAccessManager m_networkManager;
   std::unique_ptr<korrelator::websocket_manager> m_websocket;
   std::unique_ptr<korrelator::order_model> m_model = nullptr;

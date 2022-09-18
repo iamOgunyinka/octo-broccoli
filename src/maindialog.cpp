@@ -128,12 +128,11 @@ bool hasValidExchange(exchange_name_e const exchange) {
 
 } // namespace korrelator
 
-MainDialog::MainDialog(bool &warnOnExit,
-                       std::filesystem::path const configDirectory,
+MainDialog::MainDialog(bool &warnOnExit, std::filesystem::path const configDirectory,
                        QWidget *parent)
-    : QDialog(parent), ui(new Ui::MainDialog), m_websocket(nullptr),
-      m_legendLayout(nullptr), m_configDirectory(configDirectory),
-      m_warnOnExit(warnOnExit) {
+    : QDialog(parent), ui(new Ui::MainDialog), m_currentListWidget(nullptr),
+      m_websocket(nullptr), m_legendLayout(nullptr),
+      m_configDirectory(configDirectory), m_warnOnExit(warnOnExit) {
 
   ui->setupUi(this);
 
@@ -398,6 +397,12 @@ void MainDialog::connectAllUISignals() {
                                           << korrelator::constants::root_dir);
   });
   */
+  QObject::connect(ui->priceDiffListWidget, &QListWidget::itemSelectionChanged, this, [this]{
+    m_currentListWidget = ui->priceDiffListWidget;
+  });
+  QObject::connect(ui->tokenListWidget, &QListWidget::itemSelectionChanged, this, [this] {
+    m_currentListWidget = ui->tokenListWidget;
+  });
   QObject::connect(
       ui->selectionCombo,
       static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
@@ -422,11 +427,16 @@ void MainDialog::connectAllUISignals() {
   });
 
   QObject::connect(ui->spotPrevButton, &QToolButton::clicked, this, [this] {
-    auto currentRow = ui->tokenListWidget->currentRow();
-    if (currentRow < 0 || currentRow >= ui->tokenListWidget->count())
+    if (!m_currentListWidget)
       return;
-    auto item = ui->tokenListWidget->takeItem(currentRow);
-    tokenRemoved(item->text());
+
+    auto const currentRow = m_currentListWidget->currentRow();
+    if (currentRow < 0 || currentRow >= m_currentListWidget->count())
+      return;
+
+    auto item = m_currentListWidget->takeItem(currentRow);
+    if (m_currentListWidget == ui->tokenListWidget)
+      tokenRemoved(item->text());
     delete item;
     saveAppConfigToFile();
   });
@@ -1198,17 +1208,26 @@ void MainDialog::readTradesConfigFromFile() {
 void MainDialog::addNewItemToTokenMap(
     QString const &tokenName, trade_type_e const tt,
     korrelator::exchange_name_e const exchange) {
-  auto const text = tokenName.toUpper() +
-                    (tt == trade_type_e::spot ? "_SPOT" : "_FUTURES") +
-                    ("(" + exchangeNameToString(exchange) + ")") +
-                    (ui->refCheckBox->isChecked() ? "*" : "");
+
+  QString text = tokenName.toUpper() +
+      (tt == trade_type_e::spot ? "_SPOT" : "_FUTURES") +
+      ("(" + exchangeNameToString(exchange) + ")");
+
+  if (!ui->activatePriceDiffCheckbox->isChecked())
+    text += (ui->refCheckBox->isChecked() ? "*" : "");
+
   for (int i = 0; i < ui->tokenListWidget->count(); ++i) {
-    QListWidgetItem *item = ui->tokenListWidget->item(i);
+    QListWidgetItem* item = ui->tokenListWidget->item(i);
     if (text == item->text())
       return;
   }
-  ui->tokenListWidget->addItem(text);
-  newItemAdded(tokenName.toLower(), tt, exchange);
+
+  if (!ui->activatePriceDiffCheckbox->isChecked()) {
+    ui->tokenListWidget->addItem(text);
+    newItemAdded(tokenName.toLower(), tt, exchange);
+  } else {
+    ui->priceDiffListWidget->addItem(text);
+  }
 }
 
 Qt::Alignment MainDialog::getLegendAlignment() const {
