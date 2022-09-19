@@ -135,6 +135,8 @@ void kucoin_symbols::sendNetworkRequest(
           auto const tokenObject = list[i].toObject();
           korrelator::token_t t;
           t.symbolName = tokenObject.value("symbol").toString().toLower();
+          t.realPrice = std::make_shared<double>();
+
           if (tokenObject.contains("baseCurrency"))
             t.baseCurrency = tokenObject.value("baseCurrency").toString();
 
@@ -146,9 +148,9 @@ void kucoin_symbols::sendNetworkRequest(
 
           if (!tokenObject.contains(key)) {
             if (auto const f = tokenObject.value(key2); f.isString())
-              t.realPrice = f.toString().toDouble();
+              *t.realPrice = f.toString().toDouble();
             else
-              t.realPrice = f.toDouble();
+              *t.realPrice = f.toDouble();
 
             if (tokenObject.contains("multiplier"))
               t.multiplier = tokenObject.value("multiplier").toDouble();
@@ -157,7 +159,7 @@ void kucoin_symbols::sendNetworkRequest(
             if (tokenObject.contains("quoteMinSize"))
               t.quoteMinSize = tokenObject.value("quoteMinSize").toDouble();
           } else {
-            t.realPrice = tokenObject.value(key).toString().toDouble();
+            *t.realPrice = tokenObject.value(key).toString().toDouble();
           }
 
           t.exchange = exchange_name_e::kucoin;

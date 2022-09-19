@@ -60,7 +60,7 @@ void ftx_symbols::getFuturesSymbols(success_callback_t onSuccess,
 
       korrelator::token_t t;
       t.symbolName = tokenObject.value("name").toString().toLower();
-      t.realPrice = tokenObject.value("last").toDouble();
+      t.realPrice = std::make_shared<double>(tokenObject.value("last").toDouble());
       t.baseMinSize = tokenObject.value("lowerBound").toDouble();
       t.baseCurrency = tokenObject.value("underlying").toString();
       t.exchange = exchange_name_e::ftx;
@@ -119,7 +119,7 @@ void ftx_symbols::sendNetworkRequest(QString const &url,
 
       korrelator::token_t t;
       t.symbolName = tokenObject.value("name").toString().toLower();
-      t.realPrice = tokenObject.value("price").toDouble();
+      t.realPrice = std::make_shared<double>(tokenObject.value("price").toDouble());
       t.baseCurrency = tokenObject.value("baseCurrency").toString();
       t.quoteCurrency = tokenObject.value("quoteCurrency").toString();
       t.multiplier = tokenObject.value("priceIncrement").toDouble();

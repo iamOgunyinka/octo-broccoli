@@ -76,8 +76,6 @@ void websocket_manager::addSubscription(QString const &tokenName,
 }
 
 void websocket_manager::startWatch() {
-  m_checker.clear();
-
   for (auto &sock : m_sockets) {
     std::visit(
         [this](auto &&v) mutable {

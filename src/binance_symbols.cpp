@@ -65,8 +65,9 @@ void binance_symbols::sendNetworkRequest(
     for (int i = 0; i < list.size(); ++i) {
       auto const tokenObject = list[i].toObject();
       korrelator::token_t t;
+      t.realPrice = std::make_shared<double>(
+            tokenObject.value("price").toString().toDouble());
       t.symbolName = tokenObject.value("symbol").toString().toLower();
-      t.realPrice = tokenObject.value("price").toString().toDouble();
       t.exchange = exchange_name_e::binance;
       t.tradeType = tradeType;
       tokenList.push_back(std::move(t));

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QString>
-#include <map>
 #include <memory>
 #include <variant>
 #include <vector>
@@ -55,7 +54,6 @@ private:
   net::ssl::context &m_sslContext;
   std::unique_ptr<net::io_context> m_ioContext;
   std::vector<socket_variant> m_sockets;
-  std::map<exchange_name_e, std::vector<exchange_trade_pair>> m_checker;
 };
 
 } // namespace korrelator

@@ -123,7 +123,8 @@ private:
   void newItemAdded(QString const &token, trade_type_e const,
                     exchange_name_e const);
   void tokenRemoved(QString const &text);
-  void onTimerTick();
+  void onNormalizedGraphTimerTick(bool const minMaxNeedsUpdate, double const key);
+  void onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate, double const key);
   void takeBackToFactoryReset();
   void onOKButtonClicked();
   void onStartVerificationSuccessful();
@@ -137,9 +138,11 @@ private:
                             exchange_name_e const);
   void enableUIComponents(bool const);
   void resetGraphComponents();
-  void setupGraphData();
+  void setupNormalizedGraphData();
+  void setupPriceDeltaGraphData();
   void resetTickerData(bool const resetRefs, bool const resetSymbols);
   void startWebsocket();
+  void priceLaunchImpl();
   void getInitialTokenPrices();
   void populateUIComponents();
   void connectAllUISignals();
@@ -183,7 +186,9 @@ private:
                                   korrelator::api_data_t const &apiInfo,
                                   double const openPrice);
   static void updatePlottingKey(korrelator::waitable_container_t<double>&,
-                                QCustomPlot* customPlot, double& maxVisiblePlot);
+                                QCustomPlot* customPlot,
+                                QCustomPlot* priceDeltaPlot,
+                                double& maxVisiblePlot);
   static void tradeExchangeTokens(
       std::function<void()> refreshModel,
       korrelator::waitable_container_t<korrelator::plug_data_t>&,
@@ -200,6 +205,7 @@ private:
   SettingsDialog::api_data_map_t m_apiTradeApiMap;
   korrelator::token_list_t m_tokens;
   korrelator::token_list_t m_refs;
+  korrelator::token_list_t m_priceDeltas;
   std::vector<korrelator::trade_config_data_t> m_tradeConfigDataList;
   korrelator::graph_updater_t m_graphUpdater;
   korrelator::price_updater_t m_priceUpdater;

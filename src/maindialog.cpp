@@ -68,7 +68,7 @@ exchange_name_e stringToExchangeName(QString const &name) {
 }
 
 void updateTokenIter(token_t &value) {
-  auto const price = value.realPrice;
+  auto const price = *value.realPrice;
   if (value.calculatingNewMinMax) {
     value.minPrice = price * 0.75;
     value.maxPrice = price * 1.25;
@@ -103,13 +103,16 @@ void token_t::reset() {
   alpha = 1.0;
   baseMinSize = 0.0;
   quoteMinSize = 0.0;
-  normalizedPrice = realPrice = 0.0;
+  normalizedPrice = 0.0;
   multiplier = 1.0;
   tickSize = 0.0;
   graphPointsDrawnCount = 0;
   graph = nullptr;
   baseCurrency = quoteCurrency = legendName = "";
   crossOver.reset();
+
+  if (realPrice)
+    *realPrice = 0.0;
 }
 
 symbol_fetcher_t::symbol_fetcher_t()
@@ -170,7 +173,7 @@ MainDialog::MainDialog(bool &warnOnExit, std::filesystem::path const configDirec
   }}.detach();
 
   std::thread{[this] {
-    updatePlottingKey(m_graphKeys, ui->customPlot, m_maxVisiblePlot);
+    updatePlottingKey(m_graphKeys, ui->customPlot, ui->priceDeltaPlot, m_maxVisiblePlot);
   }}.detach();
 
   QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
@@ -435,8 +438,7 @@ void MainDialog::connectAllUISignals() {
       return;
 
     auto item = m_currentListWidget->takeItem(currentRow);
-    if (m_currentListWidget == ui->tokenListWidget)
-      tokenRemoved(item->text());
+    tokenRemoved(item->text());
     delete item;
     saveAppConfigToFile();
   });
@@ -554,12 +556,6 @@ void MainDialog::stopGraphPlotting() {
   m_lastTradeAction = korrelator::trade_action_e::nothing;
   enableUIComponents(true);
 
-  // for (auto &token : m_tokens)
-  //  token.reset();
-
-  // for (auto &token : m_refs)
-  //  token.reset();
-
   korrelator::plug_data_t data;
   data.tradeType = trade_type_e::unknown;
   m_tokenPlugs.append(std::move(data));
@@ -633,36 +629,31 @@ MainDialog::list_iterator MainDialog::find(korrelator::token_list_t &container,
 
 void MainDialog::newItemAdded(QString const &tokenName, trade_type_e const tt,
                               exchange_name_e const exchange) {
-  bool const isRef = ui->refCheckBox->isChecked();
-  bool const hasRefStored = find(m_tokens, "*") != m_tokens.end();
-  if (isRef) {
+  korrelator::token_t token;
+  token.symbolName = tokenName;
+  token.tradeType = tt;
+  token.exchange = exchange;
+  token.calculatingNewMinMax = true;
+  token.realPrice = std::make_shared<double>(0.0);
+
+  if (ui->activatePriceDiffCheckbox->isChecked()) {
+    m_priceDeltas.push_back(std::move(token));
+  } else if (bool const isRef = ui->refCheckBox->isChecked(); isRef) {
+    bool const hasRefStored = find(m_tokens, "*") != m_tokens.end();
     if (!hasRefStored) {
-      korrelator::token_t token;
       token.symbolName = "*";
-      token.calculatingNewMinMax = true;
-      token.tradeType = tt;
       token.normalizedPrice = CMAX_DOUBLE_VALUE;
-      m_tokens.push_back(std::move(token));
+      m_tokens.push_back(token);
     }
 
     if (find(m_refs, tokenName, tt, exchange) == m_refs.end()) {
-      korrelator::token_t token;
-      token.tradeType = tt;
       token.symbolName = tokenName;
-      token.calculatingNewMinMax = true;
-      token.tradeType = tt;
-      token.exchange = exchange;
+      token.realPrice = std::make_shared<double>();
       m_refs.push_back(std::move(token));
     }
   } else {
-    if (find(m_tokens, tokenName, tt, exchange) == m_tokens.end()) {
-      korrelator::token_t token;
-      token.symbolName = tokenName;
-      token.calculatingNewMinMax = true;
-      token.tradeType = tt;
-      token.exchange = exchange;
+    if (find(m_tokens, tokenName, tt, exchange) == m_tokens.end())
       m_tokens.push_back(std::move(token));
-    }
   }
 }
 
@@ -692,11 +683,20 @@ auto tokenNameFromWidgetName(QString specialTokenName) {
 
 void MainDialog::tokenRemoved(QString const &text) {
   auto const &data = tokenNameFromWidgetName(text);
-  auto &tokenMap = text.endsWith('*') ? m_refs : m_tokens;
   auto const &tokenName = data.tokenName;
   auto const tradeType = data.tradeType;
   auto const exchange = data.exchange;
 
+  if (ui->priceDiffListWidget == m_currentListWidget) {
+    if (auto iter = find(m_priceDeltas, tokenName, tradeType, exchange);
+        iter != m_priceDeltas.end())
+    {
+      m_priceDeltas.erase(iter);
+    }
+    return;
+  }
+
+  auto &tokenMap = text.endsWith('*') ? m_refs : m_tokens;
   if (auto iter = find(tokenMap, tokenName, tradeType, exchange);
       iter != tokenMap.end()) {
     tokenMap.erase(iter);
@@ -1222,12 +1222,12 @@ void MainDialog::addNewItemToTokenMap(
       return;
   }
 
-  if (!ui->activatePriceDiffCheckbox->isChecked()) {
-    ui->tokenListWidget->addItem(text);
-    newItemAdded(tokenName.toLower(), tt, exchange);
-  } else {
+  if (ui->activatePriceDiffCheckbox->isChecked()) {
     ui->priceDiffListWidget->addItem(text);
+  } else {
+    ui->tokenListWidget->addItem(text);
   }
+  newItemAdded(tokenName.toLower(), tt, exchange);
 }
 
 Qt::Alignment MainDialog::getLegendAlignment() const {
@@ -1248,9 +1248,13 @@ void MainDialog::resetGraphComponents() {
   ui->customPlot->clearGraphs();
   ui->customPlot->clearPlottables();
   ui->customPlot->legend->clearItems();
+
+  ui->priceDeltaPlot->clearGraphs();
+  ui->priceDeltaPlot->clearPlottables();
+  ui->priceDeltaPlot->legend->clearItems();
 }
 
-void MainDialog::setupGraphData() {
+void MainDialog::setupNormalizedGraphData() {
   static Qt::GlobalColor const colors[] = {
       Qt::red,      Qt::green,    Qt::blue,        Qt::magenta,
       Qt::cyan,     Qt::black,    Qt::darkGray,    Qt::darkGreen,
@@ -1266,6 +1270,9 @@ void MainDialog::setupGraphData() {
     };
     int i = 0;
     for (auto &value : m_tokens) {
+      if (!value.realPrice)
+        value.realPrice = std::make_shared<double>();
+
       value.graph = ui->customPlot->addGraph();
       auto const color = colors[i % (sizeof(colors) / sizeof(colors[0]))];
       value.graph->setPen(
@@ -1280,8 +1287,8 @@ void MainDialog::setupGraphData() {
 
   /* Configure x-Axis as time in secs */
   QSharedPointer<QCPAxisTickerTime> timeTicker(new QCPAxisTickerTime);
-  timeTicker->setTimeFormat("%m:%s");
-  timeTicker->setTickCount(10);
+  timeTicker->setTimeFormat("%h:%m:%s");
+  timeTicker->setTickCount(7);
 
   ui->customPlot->xAxis->setTicker(timeTicker);
   ui->customPlot->axisRect()->setupFullAxesBox();
@@ -1292,8 +1299,8 @@ void MainDialog::setupGraphData() {
   ui->customPlot->legend->setBrush(QColor(255, 255, 255, 0));
 
   /* Configure x and y-Axis to display Labels */
-  ui->customPlot->xAxis->setTickLabelFont(QFont(QFont().family(), 8));
-  ui->customPlot->yAxis->setTickLabelFont(QFont(QFont().family(), 8));
+  ui->customPlot->xAxis->setTickLabelFont(QFont(QFont().family(), 10));
+  ui->customPlot->yAxis->setTickLabelFont(QFont(QFont().family(), 10));
   ui->customPlot->xAxis->setLabel("Time(s)");
   ui->customPlot->yAxis->setLabel("Prices");
   ui->customPlot->legend->setBorderPen(Qt::NoPen);
@@ -1308,6 +1315,63 @@ void MainDialog::setupGraphData() {
   ui->customPlot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom |
                                   QCP::iSelectPlottables);
   ui->customPlot->xAxis->setTickLabelSide(QCPAxis::LabelSide::lsOutside);
+}
+
+void MainDialog::setupPriceDeltaGraphData() {
+  static Qt::GlobalColor const color = Qt::darkBlue;
+
+  if (m_priceDeltas.empty())
+    return;
+
+  /* Add graph and set the curve lines color */
+  {
+    auto legendName = [](QString const &key, trade_type_e const tt) {
+      if (key.size() == 1 && key[0] == '*') // "ref"
+        return QString("ref");
+      return (key.toUpper() +
+              (tt == trade_type_e::spot ? "_SPOT" : "_FUTURES"));
+    };
+
+    auto &value = m_priceDeltas[0];
+    value.graph = ui->priceDeltaPlot->addGraph();
+    value.graph->setPen(
+        QPen(color, ui->graphThicknessCombo->currentIndex() + 1));
+    value.graph->setAntialiasedFill(true);
+    value.legendName = legendName(value.symbolName, value.tradeType);
+    value.graph->setName(value.legendName);
+    value.graph->setLineStyle(QCPGraph::lsLine);
+  }
+
+  /* Configure x-Axis as time in secs */
+  QSharedPointer<QCPAxisTickerTime> timeTicker(new QCPAxisTickerTime);
+  timeTicker->setTimeFormat("%h:%m:%s");
+  timeTicker->setTickCount(7);
+
+  ui->priceDeltaPlot->xAxis->setTicker(timeTicker);
+  ui->priceDeltaPlot->axisRect()->setupFullAxesBox();
+  ui->priceDeltaPlot->setAutoAddPlottableToLegend(true);
+  ui->priceDeltaPlot->legend->setVisible(true);
+  ui->priceDeltaPlot->axisRect()->insetLayout()->setInsetAlignment(
+      0, getLegendAlignment());
+  ui->priceDeltaPlot->legend->setBrush(QColor(255, 255, 255, 0));
+
+  /* Configure x and y-Axis to display Labels */
+  ui->priceDeltaPlot->xAxis->setTickLabelFont(QFont(QFont().family(), 10));
+  ui->priceDeltaPlot->yAxis->setTickLabelFont(QFont(QFont().family(), 10));
+  ui->priceDeltaPlot->xAxis->setLabel("Time(s)");
+  ui->priceDeltaPlot->yAxis->setLabel("Prices");
+  ui->priceDeltaPlot->legend->setBorderPen(Qt::NoPen);
+
+  /* Make top and right axis visible, but without ticks and label */
+  ui->priceDeltaPlot->xAxis2->setVisible(false);
+  ui->priceDeltaPlot->xAxis2->setTicks(false);
+  ui->priceDeltaPlot->yAxis2->setVisible(false);
+  ui->priceDeltaPlot->yAxis->setVisible(true);
+  ui->priceDeltaPlot->yAxis->ticker()->setTickCount(10);
+  ui->priceDeltaPlot->setStyleSheet(("background:hsva(255, 255, 255, 0%);"));
+  ui->priceDeltaPlot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom |
+                                      QCP::iSelectPlottables);
+  ui->priceDeltaPlot->xAxis->setTickLabelSide(QCPAxis::LabelSide::lsOutside);
 }
 
 void MainDialog::getInitialTokenPrices() {
@@ -1454,7 +1518,9 @@ void MainDialog::onStartVerificationSuccessful() {
   ui->startButton->setText("Stop");
   resetGraphComponents();
   enableUIComponents(false);
-  setupGraphData();
+
+  setupNormalizedGraphData();
+  setupPriceDeltaGraphData();
 
   m_hasReferences = false;
 
@@ -1531,23 +1597,44 @@ void MainDialog::updateKuCoinTradeConfiguration() {
   }
 }
 
+void MainDialog::priceLaunchImpl() {
+  m_websocket = std::make_unique<korrelator::websocket_manager>();
+
+  for (auto &tokenInfo : m_refs) {
+    m_websocket->addSubscription(tokenInfo.symbolName, tokenInfo.tradeType,
+                                 tokenInfo.exchange, *tokenInfo.realPrice);
+  }
+
+  for (auto &tokenInfo : m_tokens) {
+    if (tokenInfo.symbolName.length() != 1)
+      m_websocket->addSubscription(tokenInfo.symbolName, tokenInfo.tradeType,
+                                   tokenInfo.exchange, *tokenInfo.realPrice);
+  }
+
+  if (!m_priceDeltas.empty()) {
+    for (auto &value: m_priceDeltas) {
+      if (auto iter = find(m_tokens, value.symbolName, value.tradeType, value.exchange);
+          iter != m_tokens.end())
+      {
+        value.realPrice = iter->realPrice;
+      } else {
+        iter = find(m_refs, value.symbolName, value.tradeType, value.exchange);
+        if (iter != m_refs.end())
+          value.realPrice = iter->realPrice;
+        else
+          m_websocket->addSubscription(value.symbolName, value.tradeType, value.exchange,
+                                       *value.realPrice);
+      }
+    }
+  }
+
+  m_websocket->startWatch();
+}
+
 void MainDialog::startWebsocket() {
   // price updater
   m_priceUpdater.worker = std::make_unique<korrelator::Worker>([this] {
-    m_websocket = std::make_unique<korrelator::websocket_manager>();
-
-    for (auto &tokenInfo : m_refs) {
-      m_websocket->addSubscription(tokenInfo.symbolName, tokenInfo.tradeType,
-                                   tokenInfo.exchange, tokenInfo.realPrice);
-    }
-
-    for (auto &tokenInfo : m_tokens) {
-      if (tokenInfo.symbolName.length() != 1)
-        m_websocket->addSubscription(tokenInfo.symbolName, tokenInfo.tradeType,
-                                     tokenInfo.exchange, tokenInfo.realPrice);
-    }
-
-    m_websocket->startWatch();
+    priceLaunchImpl();
   });
 
   m_priceUpdater.thread.reset(new QThread);
@@ -1556,13 +1643,25 @@ void MainDialog::startWebsocket() {
   m_priceUpdater.worker->moveToThread(m_priceUpdater.thread.get());
   m_priceUpdater.thread->start();
 
+
   // graph updater
   m_graphUpdater.worker = std::make_unique<korrelator::Worker>([this] {
     QMetaObject::invokeMethod(this, [this] {
       /* Set up and initialize the graph plotting timer */
       m_elapsedTime.restart();
-      QObject::connect(&m_timerPlot, &QTimer::timeout,
-                       m_graphUpdater.worker.get(), [this] { onTimerTick(); });
+      QObject::connect(
+          &m_timerPlot, &QTimer::timeout, m_graphUpdater.worker.get(), [this]
+      {
+        double const key = m_elapsedTime.elapsed() / 1'000.0;
+
+        // update the min max on the y-axis every second
+        bool const updatingMinMax = (key - m_lastGraphPoint) >= 1.0;
+        if (updatingMinMax)
+          m_lastGraphPoint = key;
+
+        onPriceDeltaGraphTimerTick(updatingMinMax, key);
+        onNormalizedGraphTimerTick(updatingMinMax, key);
+      });
       m_lastGraphPoint = 0.0;
       auto const timerTick = getTimerTickMilliseconds();
       m_timerPlot.start(timerTick);
@@ -1589,19 +1688,20 @@ korrelator::trade_action_e MainDialog::lineCrossedOver(double const prevA,
   return korrelator::trade_action_e::nothing;
 }
 
-void calculateGraphMinMax(korrelator::token_t &value, QCPRange const &range,
+void calculateGraphMinMax(QCPGraph* graph, QCPRange const &range,
+                          double const value,
                           double &minValue, double &maxValue) {
   bool foundInRange = false;
   auto const visibleValueRange =
-      value.graph->getValueRange(foundInRange, QCP::sdBoth, range);
+      graph->getValueRange(foundInRange, QCP::sdBoth, range);
   if (foundInRange) {
     minValue = std::min(std::min(minValue, visibleValueRange.lower),
-                        value.normalizedPrice);
+                        value);
     maxValue = std::max(std::max(maxValue, visibleValueRange.upper),
-                        value.normalizedPrice);
+                        value);
   } else {
-    minValue = std::min(minValue, value.normalizedPrice);
-    maxValue = std::max(maxValue, value.normalizedPrice);
+    minValue = std::min(minValue, value);
+    maxValue = std::max(maxValue, value);
   }
 }
 
@@ -1639,7 +1739,7 @@ MainDialog::updateRefGraph(double const keyStart, double const keyEnd,
 
   if (updatingMinMax) {
     QCPRange const range(keyStart, keyEnd);
-    calculateGraphMinMax(value, range, refResult.minValue, refResult.maxValue);
+    calculateGraphMinMax(value.graph, range, value.normalizedPrice, refResult.minValue, refResult.maxValue);
   }
 
   value.prevNormalizedPrice = value.normalizedPrice;
@@ -1689,7 +1789,7 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
 
   if (crossOverDecision != trade_action_e::nothing) {
     auto &crossOver = value.crossOver.emplace();
-    crossOver.signalPrice = value.realPrice;
+    crossOver.signalPrice = *value.realPrice;
     crossOver.action = crossOverDecision;
     crossOver.time =
         QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
@@ -1709,7 +1809,7 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
       data.marketType =
           (value.tradeType == trade_type_e::spot ? "SPOT" : "FUTURES");
       data.signalPrice = crossOverValue.signalPrice;
-      data.openPrice = value.realPrice;
+      data.openPrice = *value.realPrice;
       data.symbol = value.symbolName;
       data.openTime =
           QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
@@ -1751,7 +1851,7 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
 
   if (updatingMinMax) {
     QCPRange const range(keyStart, key);
-    calculateGraphMinMax(value, range, refResult.minValue, refResult.maxValue);
+    calculateGraphMinMax(value.graph, range, value.normalizedPrice, refResult.minValue, refResult.maxValue);
   }
 
   value.prevNormalizedPrice = value.normalizedPrice;
@@ -1771,29 +1871,59 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   }
 }
 
-void MainDialog::onTimerTick() {
-  double const key = m_elapsedTime.elapsed() / 1'000.0;
-
-  // update the min max on the y-axis every second
-  bool const updatingMinMax = (key - m_lastGraphPoint) >= 1.0;
-  if (updatingMinMax)
-    m_lastGraphPoint = key;
-
+void MainDialog::onNormalizedGraphTimerTick(
+    bool const updatingMinMax, double const key)
+{
   calculatePriceNormalization();
   updateGraphData(key, updatingMinMax);
 
   m_graphKeys.append(key);
 }
 
-void MainDialog::updatePlottingKey(
-    korrelator::waitable_container_t<double> &graphKeys,
-    QCustomPlot *customPlot, double &maxVisiblePlot) {
+void MainDialog::onPriceDeltaGraphTimerTick(
+    bool const minMaxNeedsUpdate, double const key)
+{
+  if (m_priceDeltas.empty())
+    return;
+
+  double const a = *m_priceDeltas[0].realPrice;
+  double const b = *m_priceDeltas[1].realPrice;
+  double const result = (a + b) / b;
+
+  qDebug() << "A:" << a << ", B:" << b << ", C:" << result;
+
+  double const keyStart =
+      (key >= m_maxVisiblePlot ? (key - m_maxVisiblePlot) : 0.0);
+
+  QCPGraph* graph = m_priceDeltas[0].graph;
+
+  if (minMaxNeedsUpdate) {
+    QCPRange const range(keyStart, key);
+    double minValue = CMAX_DOUBLE_VALUE;
+    double maxValue = -CMAX_DOUBLE_VALUE;
+
+    calculateGraphMinMax(graph, range, result, minValue, maxValue);
+
+    auto const diff = (maxValue - minValue) / 19.0;
+    minValue -= diff;
+    maxValue += diff;
+    ui->customPlot->yAxis->setRange(minValue, maxValue);
+  }
+
+  graph->addData(key, result);
+}
+
+void MainDialog::updatePlottingKey(korrelator::waitable_container_t<double> &graphKeys,
+    QCustomPlot *customPlot, QCustomPlot* priceDeltaPlot, double &maxVisiblePlot) {
   while (true) {
     auto const key = graphKeys.get();
     // make `key` axis range scroll right with the data at a
     // constant range of `maxVisiblePlot`, set by the user
     customPlot->xAxis->setRange(key, maxVisiblePlot, Qt::AlignRight);
     customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
+
+    priceDeltaPlot->xAxis->setRange(key, maxVisiblePlot, Qt::AlignRight);
+    priceDeltaPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
   }
 }
 
