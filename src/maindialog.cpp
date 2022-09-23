@@ -537,6 +537,7 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->graphThicknessCombo->setEnabled(enabled);
   ui->maxRetriesLine->setEnabled(enabled);
   ui->doubleTradeCheck->setEnabled(enabled);
+  ui->activatePriceDiffCheckbox->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {
@@ -899,19 +900,38 @@ void MainDialog::saveAppConfigToFile() {
       rootObject["ticks"] = jsonTicks;
   }
 
-  QJsonArray tokensJsonList;
-  for (int i = 0; i < ui->tokenListWidget->count(); ++i) {
-    QListWidgetItem *item = ui->tokenListWidget->item(i);
-    QJsonObject obj;
-    auto const displayedName = item->text();
-    auto const &d = tokenNameFromWidgetName(displayedName);
-    obj["symbol"] = d.tokenName.toLower();
-    obj["market"] = d.tradeType == trade_type_e::spot ? "spot" : "futures";
-    obj["ref"] = displayedName.endsWith('*');
-    obj["exchange"] = korrelator::exchangeNameToString(d.exchange);
-    tokensJsonList.append(obj);
+  {
+    QJsonArray tokensJsonList;
+    for (int i = 0; i < ui->tokenListWidget->count(); ++i) {
+      QListWidgetItem *item = ui->tokenListWidget->item(i);
+      QJsonObject obj;
+      auto const displayedName = item->text();
+      auto const &d = tokenNameFromWidgetName(displayedName);
+      obj["symbol"] = d.tokenName.toLower();
+      obj["market"] = d.tradeType == trade_type_e::spot ? "spot" : "futures";
+      obj["ref"] = displayedName.endsWith('*');
+      obj["exchange"] = korrelator::exchangeNameToString(d.exchange);
+      tokensJsonList.append(obj);
+    }
+    rootObject["tokens"] = tokensJsonList;
   }
-  rootObject["tokens"] = tokensJsonList;
+
+  {
+    QJsonArray pricesJsonList;
+    auto listWidget = ui->priceDiffListWidget;
+    for (int i = 0; i < listWidget->count(); ++i) {
+      QListWidgetItem *item = listWidget->item(i);
+      QJsonObject obj;
+      auto const displayedName = item->text();
+      auto const &d = tokenNameFromWidgetName(displayedName);
+      obj["symbol"] = d.tokenName.toLower();
+      obj["market"] = d.tradeType == trade_type_e::spot ? "spot" : "futures";
+      obj["exchange"] = korrelator::exchangeNameToString(d.exchange);
+      pricesJsonList.append(obj);
+    }
+    rootObject["priceDeltas"] = pricesJsonList;
+  }
+
   file.write(QJsonDocument(rootObject).toJson());
 }
 
@@ -948,7 +968,7 @@ void MainDialog::readAppConfigFromFile() {
   using korrelator::constants;
   using korrelator::tick_line_type_e;
 
-  QJsonArray tokenJsonList;
+  QJsonArray tokenJsonList, priceDeltaJsonList;
 
   {
     auto const appFilename =
@@ -1019,30 +1039,49 @@ void MainDialog::readAppConfigFromFile() {
       }
 
       tokenJsonList = jsonObject.value("tokens").toArray();
+      priceDeltaJsonList = jsonObject.value("priceDeltas").toArray();
     }
   }
 
   connectRestartTickSignal();
 
-  if (tokenJsonList.isEmpty())
-    return;
-
-  auto const refPreValue = ui->refCheckBox->isChecked();
-  for (int i = 0; i < tokenJsonList.size(); ++i) {
-    QJsonObject const obj = tokenJsonList[i].toObject();
-    auto const tokenName = obj["symbol"].toString().toUpper();
-    auto const tradeType = obj["market"].toString().toLower() == "spot"
-                               ? trade_type_e::spot
-                               : trade_type_e::futures;
-    auto const isRef = obj["ref"].toBool();
-    auto const exchange =
-        korrelator::stringToExchangeName(obj["exchange"].toString());
-    if (exchange == korrelator::exchange_name_e::none)
-      continue;
-    ui->refCheckBox->setChecked(isRef);
-    addNewItemToTokenMap(tokenName, tradeType, exchange);
+  {
+    auto const refPreValue = ui->refCheckBox->isChecked();
+    for (int i = 0; i < tokenJsonList.size(); ++i) {
+      QJsonObject const obj = tokenJsonList[i].toObject();
+      auto const tokenName = obj["symbol"].toString().toUpper();
+      auto const tradeType = obj["market"].toString().toLower() == "spot"
+                                 ? trade_type_e::spot
+                                 : trade_type_e::futures;
+      auto const isRef = obj["ref"].toBool();
+      auto const exchange =
+          korrelator::stringToExchangeName(obj["exchange"].toString());
+      if (exchange == korrelator::exchange_name_e::none)
+        continue;
+      ui->refCheckBox->setChecked(isRef);
+      addNewItemToTokenMap(tokenName, tradeType, exchange);
+    }
+    ui->refCheckBox->setChecked(refPreValue);
   }
-  ui->refCheckBox->setChecked(refPreValue);
+
+  {
+    auto const priceWidgetChecked = ui->activatePriceDiffCheckbox->isChecked();
+    for (int i = 0; i < priceDeltaJsonList.size(); ++i) {
+      QJsonObject const obj = tokenJsonList[i].toObject();
+      auto const tokenName = obj["symbol"].toString().toUpper();
+      auto const tradeType = obj["market"].toString().toLower() == "spot"
+                                 ? trade_type_e::spot
+                                 : trade_type_e::futures;
+      auto const exchange =
+          korrelator::stringToExchangeName(obj["exchange"].toString());
+      if (exchange == korrelator::exchange_name_e::none)
+        continue;
+
+      ui->activatePriceDiffCheckbox->setChecked(true);
+      addNewItemToTokenMap(tokenName, tradeType, exchange);
+    }
+    ui->activatePriceDiffCheckbox->setChecked(priceWidgetChecked);
+  }
 }
 
 void MainDialog::readTradesConfigFromFile() {

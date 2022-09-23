@@ -365,14 +365,14 @@
            <item row="0" column="0">
             <widget class="QCheckBox" name="activatePriceDiffCheckbox">
              <property name="text">
-              <string>Activate price plot</string>
+              <string>Activate the price delta widget below</string>
              </property>
             </widget>
            </item>
            <item row="0" column="1">
             <widget class="QLabel" name="label_14">
              <property name="text">
-              <string>Price Difference</string>
+              <string>Correlator Plot Tokens</string>
              </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
