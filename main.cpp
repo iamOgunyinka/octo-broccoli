@@ -2,10 +2,18 @@
 #include <QApplication>
 #include <QProcess>
 #include <QDebug>
+#include <QSettings>
 
 static char const *kRunLogic = "run__correlator__program";
 static char const *kRunLogicValue = "run__correlator__program";
+static char const *kWindowsHKey = "HKEY_LOCAL_MACHINE";
+static char const *kWindowsRegistryPath =
+    R"(SOFTWARE\Microsoft\Windows\Windows Error Reporting)";
 
+namespace korrelator {
+  void ShowNonQtMessageBox(char const *title, char const *message);
+  bool addKeyToRegistryPath(char const * const parentPath, char const * const newPath);
+}
 
 static int runCorrelatorProgram(int &argc, char **argv) {
   QApplication a(argc, argv);
@@ -14,6 +22,65 @@ static int runCorrelatorProgram(int &argc, char **argv) {
   return a.exec();
 }
 
+static void showAdminPrivilegeNeededErrorAndExit() {
+  static char const *messageBody =
+      "We need to edit and add new keys to your registry to"
+      " enable coredumps. Please restart this app as an"
+      " administrator";
+  korrelator::ShowNonQtMessageBox("Correlator", messageBody);
+}
+
+bool CheckWindowsRegistryForCoreDumpSupport() {
+  bool needsRestart = false;
+  QSettings settings(QString(kWindowsHKey) + "\\" + kWindowsRegistryPath,
+                     QSettings::NativeFormat);
+
+  qDebug() << settings.childGroups();
+  if (!settings.childGroups().contains("LocalDumps")) {
+      if (!settings.isWritable()) {
+        showAdminPrivilegeNeededErrorAndExit();
+        return false;
+      }
+      if (!korrelator::addKeyToRegistryPath(kWindowsRegistryPath, "LocalDumps"))
+        return false;
+      needsRestart = true;
+  }
+
+  if (!settings.contains("LocalDumps/CustomDumpFlags")) {
+      if (!settings.isWritable()) {
+        showAdminPrivilegeNeededErrorAndExit();
+        return false;
+      }
+
+      settings.setValue("LocalDumps/CustomDumpFlags", 0);
+      needsRestart = true;
+  }
+
+  if (!settings.contains("LocalDumps/DumpCount")) {
+      settings.setValue("LocalDumps/DumpCount", 20);
+      needsRestart = true;
+  }
+
+  if (!settings.contains("LocalDumps/DumpFolder")) {
+      settings.setValue("LocalDumps/DumpFolder", R"(%LOCALAPPDATA%\CrashDumps)");
+      needsRestart = true;
+  }
+
+  if (!settings.contains("LocalDumps/DumpType")) {
+      settings.setValue("LocalDumps/DumpType", 2);
+      needsRestart = true;
+  }
+
+  settings.sync();
+
+  if (needsRestart) {
+    korrelator::ShowNonQtMessageBox(
+          "Correlator",
+          "Please restart your computer for the changes made to your"
+          " Registry to take place.");
+  }
+  return !needsRestart;
+}
 
 static int monitorCorrelatorProgram(int &argc, char **argv) {
    QCoreApplication app{argc, argv};
@@ -26,6 +93,9 @@ static int monitorCorrelatorProgram(int &argc, char **argv) {
          app.exit(retcode); // no restart required
       }
    };
+
+   if (!CheckWindowsRegistryForCoreDumpSupport())
+     return EXIT_FAILURE;
 
    QObject::connect(&proc,
                     QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
@@ -40,6 +110,7 @@ static int monitorCorrelatorProgram(int &argc, char **argv) {
    proc.start();
    return app.exec();
 }
+
 
 int main(int argc, char **argv) {
   if (qgetenv(kRunLogic) != kRunLogicValue)

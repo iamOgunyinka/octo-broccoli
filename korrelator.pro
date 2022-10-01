@@ -23,7 +23,11 @@ CONFIG(debug, debug|release):{
     LIBS += \
             $${VCPKG_DEBUG_LPATH}\\libcrypto.lib \
             $${VCPKG_DEBUG_LPATH}\\libssl.lib \
-            $${VCPKG_DEBUG_LPATH}\\libsodium.lib
+            $${VCPKG_DEBUG_LPATH}\\libsodium.lib \
+            User32.lib \
+            Advapi32.lib \
+
+
   } else {
   # intended for any OS other than Windows
     LIBS +=
@@ -75,7 +79,8 @@ SOURCES += main.cpp \
   src/qcustomplot.cpp \
   src/single_trader.cpp \
   src/uri.cpp \
-  src/websocket_manager.cpp
+  src/websocket_manager.cpp \
+  src/windows_specifics.cpp
 
 HEADERS += include/binance_symbols.hpp \
   include/double_trader.hpp \
