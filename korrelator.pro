@@ -1,7 +1,8 @@
 QT       += core gui network websockets printsupport
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
-CONFIG += c++17
+
+CONFIG += c++17 force_debug_info
 
 VCPKG_PATH = D:\\vcpkg\\installed\\x64-windows
 VCPKG_DEBUG_LPATH = $${VCPKG_PATH}\\debug\\lib
@@ -38,7 +39,10 @@ CONFIG(release, debug|release): {
   win32: {
     LIBS += $${VCPKG_REL_LPATH}\\libcrypto.lib \
             $${VCPKG_REL_LPATH}\\libssl.lib \
-            $${VCPKG_REL_LPATH}\\libsodium.lib
+            $${VCPKG_REL_LPATH}\\libsodium.lib \
+            User32.lib \
+            Advapi32.lib \
+
   } else {
 # intended for any OS other than Windows
     LIBS +=

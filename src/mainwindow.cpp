@@ -12,6 +12,52 @@
 #include "constants.hpp"
 #include "maindialog.hpp"
 
+
+namespace korrelator {
+
+[[nodiscard]] QString CheckCrashSiteAndReportFindings() {
+  auto const expectedCrashDumpsPath = ::getLocalDumpSite();
+  if (expectedCrashDumpsPath.isEmpty())
+    return {};
+
+  std::filesystem::path const p(expectedCrashDumpsPath.toStdString());
+  if (!std::filesystem::exists(p)) // nothing to see here, just vibes
+    return {};
+
+  std::vector<QString> allKorrelatorDumps;
+  time_t lastModifiedTime = 0;
+  size_t indexOfLatest = 0;
+  for (auto const &directory_entry : std::filesystem::directory_iterator(p)) {
+    if (directory_entry.is_directory())
+      continue;
+
+    auto const sFilename = directory_entry.path().string();
+    auto const filename = QString::fromStdString(sFilename);
+    if (filename.contains("korrelator.exe") && filename.endsWith(".dmp")) {
+      allKorrelatorDumps.push_back(filename);
+      struct stat fileStat;
+      if (stat(sFilename.c_str(), &fileStat) == 0 && fileStat.st_mtime > lastModifiedTime)
+      {
+        indexOfLatest = allKorrelatorDumps.size() - 1;
+        lastModifiedTime = fileStat.st_mtime;
+      }
+    }
+  }
+
+  if (allKorrelatorDumps.empty())
+    return {};
+
+  auto const &lastDump = allKorrelatorDumps[indexOfLatest];
+
+  // at the end, remove all these dumps except the last modified dump
+  for (auto const &dumpFile: allKorrelatorDumps) {
+    if (dumpFile != lastDump)
+      std::filesystem::remove(dumpFile.toStdString());
+  }
+  return lastDump;
+}
+
+}
 MainWindow::MainWindow(QWidget *parent) :
   QMainWindow(parent),
   ui(new Ui::MainWindow),
@@ -27,6 +73,14 @@ MainWindow::MainWindow(QWidget *parent) :
   createActions();
   createMenus();
   createToolbar();
+
+  QTimer::singleShot(1'000, this, [this] // check the crash dump after a second
+  {
+    auto const lastCrashDumpFilename = korrelator::CheckCrashSiteAndReportFindings();
+    if (lastCrashDumpFilename.isEmpty())
+      return;
+    ShowCrashUI(lastCrashDumpFilename);
+  });
 }
 
 MainWindow::~MainWindow()
@@ -163,4 +217,10 @@ void MainWindow::onNewDialogTriggered() {
       delete dialog;
     });
   dialog->show();
+}
+
+void MainWindow::ShowCrashUI(QString const &filename)
+{
+  qDebug() << "Last crash: " << filename;
+  Q_UNUSED(filename);
 }

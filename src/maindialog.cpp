@@ -1960,7 +1960,7 @@ void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
     }
   }
 
-  m_priceDeltas[0].graph->addData(key, result);
+  graph->addData(key, result);
 }
 
 void MainDialog::updatePlottingKey(

@@ -30,6 +30,7 @@ private:
   void onNewDialogTriggered();
   void onPreferenceTriggered();
   void onReloadTradeConfigTriggered();
+  void ShowCrashUI(QString const &);
   MainDialog* getActiveDialog();
 
   Ui::MainWindow *ui;
@@ -44,5 +45,7 @@ private:
   QVector<QDialog*> m_dialogs;
   bool m_warnOnClose = true;
 };
+
+QString getLocalDumpSite();
 
 #endif // MAINWINDOW_HPP

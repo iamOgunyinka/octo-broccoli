@@ -3,6 +3,8 @@
 #include <QProcess>
 #include <QDebug>
 #include <QSettings>
+#include <QStandardPaths>
+#include <QDir>
 
 static char const *kRunLogic = "run__correlator__program";
 static char const *kRunLogicValue = "run__correlator__program";
@@ -22,6 +24,33 @@ static int runCorrelatorProgram(int &argc, char **argv) {
   return a.exec();
 }
 
+QString getLocalDumpSite() {
+  QString expectedCrashDumpsPath = qgetenv("localAppdata");
+
+  if (expectedCrashDumpsPath.isEmpty()) {
+    QStringList const locations =
+        QStandardPaths::standardLocations(QStandardPaths::AppLocalDataLocation);
+    expectedCrashDumpsPath.clear();
+    char const *localAppData = "AppData/Local";
+    for (auto const &location: locations) {
+      if (location.contains(localAppData)) {
+        expectedCrashDumpsPath = location;
+        break;
+      }
+    }
+    if (expectedCrashDumpsPath.isEmpty())
+      return expectedCrashDumpsPath;
+    auto const indexOfAppDataLocal = expectedCrashDumpsPath.lastIndexOf(localAppData);
+    expectedCrashDumpsPath = expectedCrashDumpsPath.left(indexOfAppDataLocal + strlen(localAppData));
+    expectedCrashDumpsPath.replace('/', '\\');
+  }
+
+  if (!expectedCrashDumpsPath.endsWith(QDir::separator()))
+    expectedCrashDumpsPath += QDir::separator();
+  expectedCrashDumpsPath += "CrashDumps";
+  return expectedCrashDumpsPath;
+}
+
 static void showAdminPrivilegeNeededErrorAndExit() {
   static char const *messageBody =
       "We need to edit and add new keys to your registry to"
@@ -35,7 +64,6 @@ bool CheckWindowsRegistryForCoreDumpSupport() {
   QSettings settings(QString(kWindowsHKey) + "\\" + kWindowsRegistryPath,
                      QSettings::NativeFormat);
 
-  qDebug() << settings.childGroups();
   if (!settings.childGroups().contains("LocalDumps")) {
       if (!settings.isWritable()) {
         showAdminPrivilegeNeededErrorAndExit();
@@ -57,12 +85,15 @@ bool CheckWindowsRegistryForCoreDumpSupport() {
   }
 
   if (!settings.contains("LocalDumps/DumpCount")) {
-      settings.setValue("LocalDumps/DumpCount", 20);
+      settings.setValue("LocalDumps/DumpCount", 10);
       needsRestart = true;
   }
 
   if (!settings.contains("LocalDumps/DumpFolder")) {
-      settings.setValue("LocalDumps/DumpFolder", R"(%LOCALAPPDATA%\CrashDumps)");
+      auto const crashSite = getLocalDumpSite();
+      if (crashSite.isEmpty())
+        return false;
+      settings.setValue("LocalDumps/DumpFolder", crashSite);
       needsRestart = true;
   }
 
@@ -85,10 +116,15 @@ bool CheckWindowsRegistryForCoreDumpSupport() {
 static int monitorCorrelatorProgram(int &argc, char **argv) {
    QCoreApplication app{argc, argv};
    QProcess proc;
-   auto onFinished = [&](int retcode, QProcess::ExitStatus status) {
+
+   int const maxRetries = 5;
+   int retries = 0;
+   auto onFinished = [&](int retcode, QProcess::ExitStatus status) mutable {
       qDebug() << status;
       if (status == QProcess::CrashExit) {
-         proc.start();      // restart the app if the app crashed
+        if (++retries >= maxRetries)
+          return app.exit(EXIT_FAILURE);
+        proc.start();      // restart the app if the app crashed
       } else {
          app.exit(retcode); // no restart required
       }
