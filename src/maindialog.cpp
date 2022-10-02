@@ -1967,8 +1967,15 @@ void MainDialog::updatePlottingKey(
     korrelator::waitable_container_t<double> &graphKeys,
     QCustomPlot *customPlot, QCustomPlot *priceDeltaPlot,
     double &maxVisiblePlot) {
+  double key = 0.0;
   while (true) {
-    auto const key = graphKeys.get();
+    try {
+      key = graphKeys.get();
+    } catch (std::exception const &e) {
+      qDebug() << e.what();
+      continue;
+    }
+
     // make `key` axis range scroll right with the data at a
     // constant range of `maxVisiblePlot`, set by the user
     customPlot->xAxis->setRange(key, maxVisiblePlot, Qt::AlignRight);

@@ -28,16 +28,16 @@ websocket_manager::~websocket_manager() {
   m_ioContext->stop();
 
   for (auto &sock : m_sockets) {
-    std::visit(
-        [](auto &&v) {
-          v->requestStop();
-          delete v;
-        },
-        sock);
+    std::visit([](auto &&v) { v->requestStop(); }, sock);
+  }
+
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  for (auto &sock : m_sockets) {
+    std::visit([](auto &&v) { delete v; }, sock);
   }
 
   m_sockets.clear();
-  m_ioContext->reset();
+  m_ioContext.reset();
 }
 
 void websocket_manager::addSubscription(QString const &tokenName,

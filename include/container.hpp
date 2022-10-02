@@ -32,6 +32,8 @@ public:
   T get() {
     std::unique_lock<std::mutex> u_lock{mutex_};
     cv_.wait(u_lock, [this] { return !container_.empty(); });
+    if (container_.empty()) // avoid spurious wakeup
+      throw std::runtime_error("container is empty when it isn't supposed to");
     T value{std::move(container_.front())};
     container_.pop_front();
     return value;
