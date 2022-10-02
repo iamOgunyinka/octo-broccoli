@@ -61,6 +61,7 @@ SOURCES += main.cpp \
   src/double_trader.cpp \
   src/mainwindow.cpp \
   src/binance_symbols.cpp \
+  src/crashreportdialog.cpp \
   src/ftx_futures_plug.cpp \
   src/ftx_https_request.cpp \
   src/ftx_spots_plug.cpp \
@@ -87,6 +88,7 @@ SOURCES += main.cpp \
   src/windows_specifics.cpp
 
 HEADERS += include/binance_symbols.hpp \
+  include/crashreportdialog.hpp \
   include/double_trader.hpp \
   include/ftx_futures_plug.hpp \
   include/ftx_https_request.hpp \
@@ -119,6 +121,7 @@ HEADERS += include/binance_symbols.hpp \
   include/mainwindow.hpp
 
 FORMS += ui/settingsdialog.ui \
+    ui/crashreportdialog.ui \
     ui/mainwindow.ui \
     ui/maindialog.ui
 

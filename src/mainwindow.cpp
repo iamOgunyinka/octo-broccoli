@@ -10,8 +10,8 @@
 #include <QMdiSubWindow>
 
 #include "constants.hpp"
+#include "crashreportdialog.hpp"
 #include "maindialog.hpp"
-
 
 namespace korrelator {
 
@@ -221,6 +221,19 @@ void MainWindow::onNewDialogTriggered() {
 
 void MainWindow::ShowCrashUI(QString const &filename)
 {
-  qDebug() << "Last crash: " << filename;
-  Q_UNUSED(filename);
+  auto dialog = new CrashReportDialog(this);
+  dialog->setCrashFile(filename);
+
+  auto subWindow = m_workSpace->addSubWindow(dialog);
+  subWindow->setAttribute(Qt::WA_DeleteOnClose);
+  subWindow->setWindowTitle(dialog->windowTitle());
+
+  QObject::connect(dialog, &CrashReportDialog::finished, subWindow,
+                   &QMdiSubWindow::close);
+  QObject::connect(dialog, &CrashReportDialog::accepted, subWindow,
+                   &QMdiSubWindow::close);
+  QObject::connect(subWindow, &QMdiSubWindow::destroyed, this, [dialog] {
+    delete dialog;
+  });
+  dialog->show();
 }
