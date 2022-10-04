@@ -2,6 +2,8 @@
 #define CRASHREPORTDIALOG_HPP
 
 #include <QDialog>
+#include <QFile>
+#include <QNetworkAccessManager>
 
 namespace Ui {
   class CrashReportDialog;
@@ -18,12 +20,14 @@ public:
   void setCrashFile(QString const &filename);
 
 private:
-  void OnDeleteFileRequested(bool const confirmDelete);
+  void OnDeleteFileRequested();
   void OnSendFileForCheck();
+  void UploadPayload(QFile* payloadFile);
+  void onFileUploadCompleted(QNetworkReply*);
 
   Ui::CrashReportDialog *ui;
   QString m_oldCrashFilename;
-  // QString m_newCrashFilename;
+  QNetworkAccessManager m_networkAccessManager;
 };
 
 #endif // CRASHREPORTDIALOG_HPP
