@@ -155,6 +155,7 @@ private:
   double getMaxPlotsInVisibleRegion() const;
   void updateGraphData(double const key, bool const);
   void setupOrderTableModel();
+  void calculateAveragePriceDifference();
   void updateTradeConfigurationPrecisions();
   void onNewOrderDetected(korrelator::cross_over_data_t,
                           korrelator::model_data_t,
@@ -198,6 +199,7 @@ private:
 private:
   Ui::MainDialog *ui;
   QListWidget* m_currentListWidget;
+  QTimer *m_averagePriceDifferenceTimer = nullptr;
   QNetworkAccessManager m_networkManager;
   std::unique_ptr<korrelator::websocket_manager> m_websocket;
   std::unique_ptr<korrelator::order_model> m_model = nullptr;
@@ -222,6 +224,8 @@ private:
   double m_lastGraphPoint = 0.0;
   double m_threshold = 0.0;
   double m_maxVisiblePlot = 100.0;
+  double m_lastKeyUsed = 0.0;
+  double m_lastPriceAverage = 0.0;
 
   int m_maxOrderRetries = 10;
   int m_expectedTradeCount = 1; // max 2

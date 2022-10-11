@@ -238,6 +238,12 @@ MainDialog::~MainDialog() {
   m_websocket.reset();
   saveAppConfigToFile();
 
+  if (m_averagePriceDifferenceTimer && m_averagePriceDifferenceTimer->isActive()) {
+    m_averagePriceDifferenceTimer->stop();
+    delete m_averagePriceDifferenceTimer;
+    m_averagePriceDifferenceTimer = nullptr;
+  }
+
   delete ui;
 }
 
@@ -295,6 +301,8 @@ void MainDialog::populateUIComponents() {
   ui->maxRetriesLine->setValidator(new QIntValidator(1, 100));
   ui->specialLine->setValidator(new QDoubleValidator);
   ui->restartTickLine->setValidator(new QIntValidator(1, 1'000'000));
+  ui->averageTimerLine->setValidator(new QIntValidator(0, 1'000'000));
+  ui->averageThresholdLine->setValidator(new QDoubleValidator());
   ui->timerTickCombo->addItems(
       {"100ms", "200ms", "500ms", "1 sec", "2 secs", "5 secs"});
   ui->selectionCombo->addItems({"Default(100 seconds)", "1 min", "2 mins",
@@ -563,6 +571,14 @@ void MainDialog::stopGraphPlotting() {
   data.tradeType = trade_type_e::unknown;
   m_tokenPlugs.append(std::move(data));
   m_websocket.reset();
+
+  if (m_averagePriceDifferenceTimer &&
+      m_averagePriceDifferenceTimer->isActive()) {
+    m_averagePriceDifferenceTimer->stop();
+    delete m_averagePriceDifferenceTimer;
+    m_averagePriceDifferenceTimer = nullptr;
+  }
+  saveAppConfigToFile();
 }
 
 int MainDialog::getTimerTickMilliseconds() const {
@@ -884,6 +900,8 @@ void MainDialog::saveAppConfigToFile() {
   rootObject["maxRetries"] = ui->maxRetriesLine->text().trimmed().toInt();
   rootObject["reverse"] = ui->reverseCheckBox->isChecked();
   rootObject["liveTrade"] = ui->liveTradeCheckbox->isChecked();
+  rootObject["lastPriceAverage"] = m_lastPriceAverage;
+  rootObject["averagePriceTimer"] = ui->averageTimerLine->text().trimmed().toInt();
 
   {
     QJsonArray jsonTicks;
@@ -999,6 +1017,10 @@ void MainDialog::readAppConfigFromFile() {
           jsonObject.value("doubleTrade").toBool(false);
       ui->doubleTradeCheck->setChecked(doubleTradeChecked);
       m_expectedTradeCount = doubleTradeChecked ? 2 : 1;
+
+      m_lastPriceAverage = jsonObject.value("lastPriceAverage").toDouble(0.0);
+      ui->averageTimerLine->setText(
+            QString::number(jsonObject.value("averagePriceTimer").toInt()));
 
       auto const graphThickness =
           std::clamp(jsonObject.value("graphThickness").toInt(), 1, 5);
@@ -1543,6 +1565,16 @@ bool MainDialog::validateUserInput() {
     return false;
   }
 
+  if (auto const averageTimer = getIntegralValue(ui->averageTimerLine);
+      averageTimer.has_value()) {
+    if (*averageTimer != 0.0) {
+      m_averagePriceDifferenceTimer = new QTimer();
+      m_averagePriceDifferenceTimer->setInterval(
+          std::chrono::milliseconds(int(*averageTimer) * 1'000));
+    }
+  } else {
+    return false;
+  }
   return true;
 }
 
@@ -1696,15 +1728,16 @@ void MainDialog::startWebsocket() {
       m_elapsedTime.restart();
       QObject::connect(
           &m_timerPlot, &QTimer::timeout, m_graphUpdater.worker.get(), [this] {
-            double const key = m_elapsedTime.elapsed() / 1'000.0;
+            m_lastKeyUsed = m_elapsedTime.elapsed() / 1'000.0;
 
             // update the min max on the y-axis every second
-            bool const updatingMinMax = (key - m_lastGraphPoint) >= 1.0;
+            bool const updatingMinMax =
+                (m_lastKeyUsed - m_lastGraphPoint) >= 1.0;
             if (updatingMinMax)
-              m_lastGraphPoint = key;
+              m_lastGraphPoint = m_lastKeyUsed;
 
-            onPriceDeltaGraphTimerTick(updatingMinMax, key);
-            onNormalizedGraphTimerTick(updatingMinMax, key);
+            onPriceDeltaGraphTimerTick(updatingMinMax, m_lastKeyUsed);
+            onNormalizedGraphTimerTick(updatingMinMax, m_lastKeyUsed);
           });
       m_lastGraphPoint = 0.0;
       auto const timerTick = getTimerTickMilliseconds();
@@ -1717,6 +1750,40 @@ void MainDialog::startWebsocket() {
                    m_graphUpdater.worker.get(), &korrelator::Worker::startWork);
   m_graphUpdater.worker->moveToThread(m_graphUpdater.thread.get());
   m_graphUpdater.thread->start();
+
+  if (m_averagePriceDifferenceTimer) {
+    QObject::connect(m_averagePriceDifferenceTimer, &QTimer::timeout, this,
+                     &MainDialog::calculateAveragePriceDifference);
+    m_averagePriceDifferenceTimer->start();
+  }
+}
+
+bool calculateSimpleGraphMinMax(QCPGraph *graph, QCPRange const &range,
+                                double &minValue, double &maxValue) {
+  bool foundInRange = false;
+  auto const visibleValueRange =
+      graph->getValueRange(foundInRange, QCP::sdBoth, range);
+  if (foundInRange) {
+    minValue = visibleValueRange.lower;
+    maxValue = visibleValueRange.upper;
+  }
+  return foundInRange;
+}
+
+void MainDialog::calculateAveragePriceDifference() {
+  if (m_priceDeltas.empty() || m_priceDeltas[0].graph == nullptr)
+    return;
+
+  double const keyStart =
+      (m_lastKeyUsed >= m_maxVisiblePlot ? (m_lastKeyUsed - m_maxVisiblePlot)
+                                         : 0.0);
+  double minValue, maxValue;
+  if (calculateSimpleGraphMinMax(m_priceDeltas[0].graph,
+                                 QCPRange(keyStart, m_lastKeyUsed), minValue,
+                                 maxValue)) {
+    m_lastPriceAverage = (maxValue + minValue) / 2.0;
+    qDebug() << "Last Average Calculated" << m_lastPriceAverage;
+  }
 }
 
 korrelator::trade_action_e MainDialog::lineCrossedOver(double const prevA,
@@ -1947,12 +2014,8 @@ void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
   QCPGraph *const graph = value.graph;
   if (minMaxNeedsUpdate) {
     QCPRange const range(keyStart, key);
-    bool foundInRange = false;
-    auto const visibleValueRange =
-        graph->getValueRange(foundInRange, QCP::sdBoth, range);
-    if (foundInRange) {
-      auto minValue = visibleValueRange.lower;
-      auto maxValue = visibleValueRange.upper;
+    double minValue = 0.0, maxValue = 0.0;
+    if (calculateSimpleGraphMinMax(graph, range, minValue, maxValue)) {
       auto const diff = (maxValue - minValue) / 11.0;
       minValue -= diff;
       maxValue += diff;
