@@ -388,19 +388,47 @@
           </layout>
          </item>
          <item row="1" column="1">
-          <widget class="QGroupBox" name="groupBox_2">
+          <widget class="QGroupBox" name="averageGroupbox">
            <property name="title">
             <string>Average</string>
            </property>
-           <layout class="QFormLayout" name="formLayout">
-            <item row="0" column="0">
+           <layout class="QGridLayout" name="gridLayout_9">
+            <item row="3" column="0">
+             <widget class="QLabel" name="label_16">
+              <property name="text">
+               <string>Make order if price &gt;= AVG + N</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
              <widget class="QLabel" name="label_15">
               <property name="text">
                <string>Find average every X seconds</string>
               </property>
              </widget>
             </item>
+            <item row="0" column="0">
+             <widget class="QRadioButton" name="allowBothTradeRadio">
+              <property name="text">
+               <string>Allow normal + average trade</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="2">
+             <widget class="QRadioButton" name="allowAverageTradeRadio">
+              <property name="text">
+               <string>Only average trade</string>
+              </property>
+             </widget>
+            </item>
             <item row="0" column="1">
+             <widget class="QRadioButton" name="allowNormalTradeRadio">
+              <property name="text">
+               <string>Only normal trade</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1" colspan="2">
              <widget class="QLineEdit" name="averageTimerLine">
               <property name="alignment">
                <set>Qt::AlignCenter</set>
@@ -410,14 +438,7 @@
               </property>
              </widget>
             </item>
-            <item row="1" column="0">
-             <widget class="QLabel" name="label_16">
-              <property name="text">
-               <string>Make order if price &gt;= AVG + N</string>
-              </property>
-             </widget>
-            </item>
-            <item row="1" column="1">
+            <item row="3" column="1" colspan="2">
              <widget class="QLineEdit" name="averageThresholdLine">
               <property name="alignment">
                <set>Qt::AlignCenter</set>
