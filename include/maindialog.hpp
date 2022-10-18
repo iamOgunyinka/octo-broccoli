@@ -235,6 +235,7 @@ private:
 
   Ui::MainDialog *ui;
   QListWidget* m_currentListWidget;
+  QTimer *m_averagePriceDifferenceTimer = nullptr;
   QNetworkAccessManager m_networkManager;
   std::unique_ptr<korrelator::websocket_manager> m_websocket;
   std::unique_ptr<korrelator::order_model> m_model = nullptr;
@@ -274,6 +275,7 @@ private:
   bool m_firstRun = true;
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;
+  bool m_tradeOpened = false;
   bool& m_warnOnExit;
 };
 

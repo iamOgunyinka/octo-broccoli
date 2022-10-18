@@ -238,6 +238,13 @@ MainDialog::~MainDialog() {
   m_websocket.reset();
   saveAppConfigToFile();
 
+  if (m_averagePriceDifferenceTimer &&
+      m_averagePriceDifferenceTimer->isActive()) {
+    m_averagePriceDifferenceTimer->stop();
+    delete m_averagePriceDifferenceTimer;
+    m_averagePriceDifferenceTimer = nullptr;
+  }
+
   delete ui;
 }
 
@@ -539,6 +546,10 @@ void MainDialog::onNewOrderDetected(korrelator::cross_over_data_t crossOver,
                                     korrelator::order_origin_e const origin) {
   using korrelator::order_origin_e;
   using korrelator::trade_action_e;
+
+  if (!m_tradeOpened)
+    return;
+
   auto &currentAction = crossOver.action;
 
   if (ui->reverseCheckBox->isChecked()) {
@@ -650,6 +661,14 @@ void MainDialog::stopGraphPlotting() {
   data.tradeType = trade_type_e::unknown;
   m_tokenPlugs.append(std::move(data));
   m_websocket.reset();
+
+  if (m_averagePriceDifferenceTimer &&
+      m_averagePriceDifferenceTimer->isActive()) {
+    m_averagePriceDifferenceTimer->stop();
+    delete m_averagePriceDifferenceTimer;
+    m_averagePriceDifferenceTimer = nullptr;
+  }
+  saveAppConfigToFile();
 }
 
 int MainDialog::getTimerTickMilliseconds() const {
@@ -968,6 +987,12 @@ void MainDialog::saveAppConfigToFile() {
   rootObject["maxRetries"] = ui->maxRetriesLine->text().trimmed().toInt();
   rootObject["reverse"] = ui->reverseCheckBox->isChecked();
   rootObject["liveTrade"] = ui->liveTradeCheckbox->isChecked();
+  rootObject["lastPriceAverage"] = m_lastPriceAverage;
+  rootObject["useLastAverage"] = ui->useLastAverageCheckbox->isChecked();
+  rootObject["averagePriceTimer"] =
+      ui->averageTimerLine->text().trimmed().toInt();
+  rootObject["lastOrderSource"] = static_cast<int>(m_orderOrigin);
+  rootObject["averageThreshold"] = ui->averageThresholdLine->text().trimmed();
 
   {
     QJsonArray jsonTicks;
@@ -1089,6 +1114,9 @@ void MainDialog::readAppConfigFromFile() {
           jsonObject.value("doubleTrade").toBool(false);
       ui->doubleTradeCheck->setChecked(doubleTradeChecked);
       m_expectedTradeCount = doubleTradeChecked ? 2 : 1;
+
+      ui->averageTimerLine->setText(
+          QString::number(jsonObject.value("averagePriceTimer").toInt()));
 
       auto const graphThickness =
           std::clamp(jsonObject.value("graphThickness").toInt(), 1, 5);
@@ -1222,7 +1250,7 @@ void MainDialog::readTradesConfigFromFile() {
     return;
   }
 
-  m_tradeConfigDataList.clear();
+  trade_config_list_t tradeConfigList;
   auto const objectKeys = jsonObject.keys();
 
   for (int i = 0; i < objectKeys.size(); ++i) {
@@ -1294,39 +1322,40 @@ void MainDialog::readTradesConfigFromFile() {
 
       if (data.tradeType == trade_type_e::futures)
         data.leverage = object.value("leverage").toInt();
-      m_tradeConfigDataList.push_back(std::move(data));
+
+      tradeConfigList.push_back(std::move(data));
     }
   }
 
   // add tradeID to all trades without prior ID
-  for (auto &tradeData : m_tradeConfigDataList) {
+  for (auto &tradeData : tradeConfigList) {
     if (tradeData.tradeID == 0) {
-      auto const iter = std::max_element(
-          m_tradeConfigDataList.cbegin(), m_tradeConfigDataList.cend(),
-          [](auto const &data1, auto const &data2) {
-            return data1.tradeID < data2.tradeID;
-          });
+      auto const iter =
+          std::max_element(tradeConfigList.cbegin(), tradeConfigList.cend(),
+                           [](auto const &data1, auto const &data2) {
+                             return data1.tradeID < data2.tradeID;
+                           });
       tradeData.tradeID = iter->tradeID + 1;
     }
   }
 
   // validate the friends side of things
-  for (auto const &tradeData : m_tradeConfigDataList) {
+  for (auto const &tradeData : tradeConfigList) {
     if (tradeData.friendForID == 0)
       continue;
 
-    auto findIiter = std::find_if(
-        m_tradeConfigDataList.cbegin(), m_tradeConfigDataList.cend(),
-        [id = tradeData.friendForID](auto const &tradeData) {
-          return id == tradeData.tradeID;
-        });
+    auto findIiter =
+        std::find_if(tradeConfigList.cbegin(), tradeConfigList.cend(),
+                     [id = tradeData.friendForID](auto const &tradeData) {
+                       return id == tradeData.tradeID;
+                     });
     if (findIiter ==
-        m_tradeConfigDataList.cend()) { // the friend specified is not found
+        tradeConfigList.cend()) { // the friend specified is not found
       QMessageBox::critical(
           this, tr("Error"),
           tr("The friend specified for tradeID %1 is not found")
               .arg(tradeData.tradeID));
-      return m_tradeConfigDataList.clear();
+      return tradeConfigList.clear();
     }
     auto const &friendTradeData = *findIiter;
     // a friend should have an opposite trade type
@@ -1342,8 +1371,7 @@ void MainDialog::readTradesConfigFromFile() {
               // display the opposite
               .arg((tradeData.tradeType != trade_type_e::spot ? "spot"
                                                               : "futures")));
-      ;
-      return m_tradeConfigDataList.clear();
+      return tradeConfigList.clear();
     }
 
     if (friendTradeData.side == tradeData.side) {
@@ -1352,11 +1380,11 @@ void MainDialog::readTradesConfigFromFile() {
           tr("In trade with id %1, the sides (BUY/SELL) for the trade"
              " should be opposites BUY->SELL, SELL->BUY")
               .arg(tradeData.tradeID));
-      return m_tradeConfigDataList.clear();
+      return tradeConfigList.clear();
     }
   }
 
-  std::sort(m_tradeConfigDataList.begin(), m_tradeConfigDataList.end(),
+  std::sort(tradeConfigList.begin(), tradeConfigList.end(),
             [](auto const &a, auto const &b) {
               return std::tuple(a.exchange, a.symbol.toLower()) <
                      std::tuple(b.exchange, b.symbol.toLower());
