@@ -295,11 +295,13 @@ void MainDialog::populateUIComponents() {
   ui->maxRetriesLine->setValidator(new QIntValidator(1, 100));
   ui->specialLine->setValidator(new QDoubleValidator);
   ui->restartTickLine->setValidator(new QIntValidator(1, 1'000'000));
+  ui->averageTimerLine->setValidator(new QIntValidator(0, 1'000'000));
+  ui->averageThresholdLine->setValidator(new QDoubleValidator());
   ui->timerTickCombo->addItems(
       {"100ms", "200ms", "500ms", "1 sec", "2 secs", "5 secs"});
-  ui->selectionCombo->addItems({"Default(100 seconds)", "1 min", "2 mins",
-                                "5 mins", "10 mins", "30 mins", "1 hr", "2 hrs",
-                                "3 hrs", "5 hrs"});
+  ui->selectionCombo->addItems({"100 seconds", "1 min", "2 mins", "5 mins",
+                                "10 mins", "30 mins", "1 hr", "2 hrs", "3 hrs",
+                                "5 hrs"});
   ui->legendPositionCombo->addItems(
       {"Top Left", "Top Right", "Bottom Left", "Bottom Right"});
   ui->graphThicknessCombo->addItems({"1", "2", "3", "4", "5"});
@@ -307,7 +309,6 @@ void MainDialog::populateUIComponents() {
   ui->umbralLine->setText("5");
   ui->oneOpCheckBox->setChecked(true);
   ui->maxRetriesLine->setText("10");
-
 #ifdef TESTNET
   ui->liveTradeCheckbox->setChecked(true);
 #endif
@@ -477,12 +478,66 @@ void MainDialog::connectAllUISignals() {
     if (m_findingUmbral)
       m_threshold /= 100.0;
   });
+  ConnectAllTradeRadioSignals(true);
+}
+
+void MainDialog::ConnectAllTradeRadioSignals(bool const isConnect) {
+  if (isConnect) {
+    QObject::connect(ui->allowAverageTradeRadio, &QRadioButton::toggled, this,
+                     &MainDialog::OnTradeAverageRadioToggled);
+    QObject::connect(ui->allowNormalTradeRadio, &QRadioButton::toggled, this,
+                     &MainDialog::OnTradeNormalizedPriceToggled);
+    QObject::connect(ui->allowBothTradeRadio, &QRadioButton::toggled, this,
+                     &MainDialog::OnTradeBothAverageNormalToggled);
+  } else {
+    ui->allowAverageTradeRadio->disconnect(this);
+    ui->allowBothTradeRadio->disconnect(this);
+    ui->allowNormalTradeRadio->disconnect(this);
+  }
+}
+
+void MainDialog::OnTradeBothAverageNormalToggled(bool const isSelected) {
+  if (!isSelected)
+    return;
+
+  m_orderOrigin = korrelator::order_origin_e::from_both;
+  if (!m_priceAverageOrderData)
+    m_priceAverageOrderData.emplace();
+  if (!m_normalizationOrderData)
+    m_normalizationOrderData.emplace();
+  readTradesConfigFromFile();
+}
+
+void MainDialog::OnTradeAverageRadioToggled(bool const isSelected) {
+  if (!isSelected)
+    return;
+
+  m_orderOrigin = korrelator::order_origin_e::from_price_average;
+  m_normalizationOrderData.reset();
+  if (!m_priceAverageOrderData) {
+    m_priceAverageOrderData.emplace();
+    readTradesConfigFromFile();
+  }
+}
+
+void MainDialog::OnTradeNormalizedPriceToggled(bool const isSelected) {
+  if (!isSelected)
+    return;
+
+  m_orderOrigin = korrelator::order_origin_e::from_price_normalization;
+  m_priceAverageOrderData.reset();
+  if (!m_normalizationOrderData) {
+    m_normalizationOrderData.emplace();
+    readTradesConfigFromFile();
+  }
 }
 
 void MainDialog::onNewOrderDetected(korrelator::cross_over_data_t crossOver,
                                     korrelator::model_data_t modelData,
                                     exchange_name_e const exchange,
-                                    trade_type_e const tradeType) {
+                                    trade_type_e const tradeType,
+                                    korrelator::order_origin_e const origin) {
+  using korrelator::order_origin_e;
   using korrelator::trade_action_e;
   auto &currentAction = crossOver.action;
 
@@ -514,6 +569,9 @@ void MainDialog::onNewOrderDetected(korrelator::cross_over_data_t crossOver,
   modelData.exchange = korrelator::exchangeNameToString(exchange);
   modelData.userOrderID =
       QString::number(QRandomGenerator::global()->generate());
+  modelData.tradeOrigin = origin == order_origin_e::from_price_average
+                              ? "Average"
+                              : "Normalization";
 
   if (m_model)
     m_model->AddData(modelData);
@@ -558,6 +616,7 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->maxRetriesLine->setEnabled(enabled);
   ui->doubleTradeCheck->setEnabled(enabled);
   ui->activatePriceDiffCheckbox->setEnabled(enabled);
+  ui->averageGroupbox->setEnabled(enabled);
 }
 
 void MainDialog::stopGraphPlotting() {
@@ -573,9 +632,18 @@ void MainDialog::stopGraphPlotting() {
   m_priceUpdater.worker.reset();
   m_priceUpdater.thread.reset();
 
-  m_programIsRunning = false;
-  m_firstRun = false;
-  m_lastTradeAction = korrelator::trade_action_e::nothing;
+  m_programIsRunning = m_tradeOpened = m_firstRun = false;
+  if (m_normalizationOrderData)
+    m_normalizationOrderData->lastTradeAction =
+        korrelator::trade_action_e::nothing;
+
+  if (m_priceAverageOrderData) {
+    m_priceAverageOrderData->futuresLastAction =
+        korrelator::trade_action_e::nothing;
+    m_priceAverageOrderData->spotsLastAction =
+        korrelator::trade_action_e::nothing;
+  }
+
   enableUIComponents(true);
 
   korrelator::plug_data_t data;
@@ -1611,6 +1679,27 @@ bool MainDialog::validateUserInput() {
     return false;
   }
 
+  if (auto const averageTimer = getIntegralValue(ui->averageTimerLine);
+      averageTimer.has_value()) {
+    if (*averageTimer > 0.0) {
+      m_averagePriceDifferenceTimer = new QTimer();
+      m_averagePriceDifferenceTimer->setInterval(
+          std::chrono::milliseconds(int(*averageTimer) * 1'000));
+    }
+  } else {
+    return false;
+  }
+
+  if (auto const maxAverageThreshold =
+          getIntegralValue(ui->averageThresholdLine);
+      maxAverageThreshold.has_value()) {
+    if (*maxAverageThreshold > 0.0) {
+      m_maxAverageThreshold = maxAverageThreshold.value() / 100.0;
+    }
+  } else {
+    return false;
+  }
+
   return true;
 }
 
@@ -1627,7 +1716,16 @@ void MainDialog::setupOrderTableModel() {
 
 void MainDialog::onStartVerificationSuccessful() {
   m_programIsRunning = true;
-  m_lastTradeAction = korrelator::trade_action_e::nothing;
+  if (m_normalizationOrderData)
+    m_normalizationOrderData->lastTradeAction =
+        korrelator::trade_action_e::nothing;
+
+  if (m_priceAverageOrderData) {
+    m_priceAverageOrderData->spotsLastAction =
+        m_priceAverageOrderData->futuresLastAction =
+            korrelator::trade_action_e::nothing;
+  }
+
   m_maxVisiblePlot = getMaxPlotsInVisibleRegion();
 
   ui->startButton->setText("Stop");
@@ -1682,9 +1780,19 @@ void MainDialog::calculatePriceNormalization() {
 
 void MainDialog::updateKuCoinTradeConfiguration() {
   using korrelator::trade_type_e;
+
   {
-    for (size_t x = 0; x < m_tradeConfigDataList.size(); ++x) {
-      auto &configuration = m_tradeConfigDataList[x];
+    trade_config_list_t *orderDataList = nullptr;
+    if (m_normalizationOrderData.has_value())
+      orderDataList = &(m_normalizationOrderData->dataList);
+    else if (m_priceAverageOrderData.has_value())
+      orderDataList = &(m_priceAverageOrderData->dataList);
+
+    if (orderDataList == nullptr || orderDataList->empty())
+      return;
+
+    for (size_t x = 0; x < orderDataList->size(); ++x) {
+      auto &configuration = (*orderDataList)[x];
       if (configuration.exchange != exchange_name_e::kucoin)
         continue;
       auto &kucoinContainer =
@@ -1764,15 +1872,16 @@ void MainDialog::startWebsocket() {
       m_elapsedTime.restart();
       QObject::connect(
           &m_timerPlot, &QTimer::timeout, m_graphUpdater.worker.get(), [this] {
-            double const key = m_elapsedTime.elapsed() / 1'000.0;
+            m_lastKeyUsed = m_elapsedTime.elapsed() / 1'000.0;
 
             // update the min max on the y-axis every second
-            bool const updatingMinMax = (key - m_lastGraphPoint) >= 1.0;
+            bool const updatingMinMax =
+                (m_lastKeyUsed - m_lastGraphPoint) >= 1.0;
             if (updatingMinMax)
-              m_lastGraphPoint = key;
+              m_lastGraphPoint = m_lastKeyUsed;
 
-            onPriceDeltaGraphTimerTick(updatingMinMax, key);
-            onNormalizedGraphTimerTick(updatingMinMax, key);
+            onPriceDeltaGraphTimerTick(updatingMinMax, m_lastKeyUsed);
+            onNormalizedGraphTimerTick(updatingMinMax, m_lastKeyUsed);
           });
       m_lastGraphPoint = 0.0;
       auto const timerTick = getTimerTickMilliseconds();
@@ -1785,6 +1894,53 @@ void MainDialog::startWebsocket() {
                    m_graphUpdater.worker.get(), &korrelator::Worker::startWork);
   m_graphUpdater.worker->moveToThread(m_graphUpdater.thread.get());
   m_graphUpdater.thread->start();
+
+  QTimer::singleShot(std::chrono::milliseconds(10'000), this, [this] {
+    m_tradeOpened = true;
+    calculateAveragePriceDifference();
+  });
+
+  if (m_averagePriceDifferenceTimer) {
+    QObject::connect(m_averagePriceDifferenceTimer, &QTimer::timeout, this,
+                     &MainDialog::calculateAveragePriceDifference);
+    m_averagePriceDifferenceTimer->start();
+  }
+}
+
+bool calculateSimpleGraphMinMax(QCPGraph *graph, QCPRange const &range,
+                                double &minValue, double &maxValue) {
+  bool foundInRange = false;
+  auto const visibleValueRange =
+      graph->getValueRange(foundInRange, QCP::sdBoth, range);
+  if (foundInRange) {
+    minValue = visibleValueRange.lower;
+    maxValue = visibleValueRange.upper;
+  }
+  return foundInRange;
+}
+
+void MainDialog::calculateAveragePriceDifference() {
+  if (m_priceDeltas.empty() || m_priceDeltas[0].graph == nullptr)
+    return;
+
+  double const keyStart =
+      (m_lastKeyUsed >= m_maxVisiblePlot ? (m_lastKeyUsed - m_maxVisiblePlot)
+                                         : 0.0);
+  double minValue, maxValue;
+  if (calculateSimpleGraphMinMax(m_priceDeltas[0].graph,
+                                 QCPRange(keyStart, m_lastKeyUsed), minValue,
+                                 maxValue)) {
+    m_lastPriceAverage = (maxValue + minValue) / 2.0;
+
+    qDebug() << "New average:" << m_lastPriceAverage;
+
+    if (m_maxAverageThreshold != 0.0) {
+      m_averageUp = m_lastPriceAverage + m_maxAverageThreshold;
+      m_averageDown = m_lastPriceAverage - m_maxAverageThreshold;
+
+      qDebug() << "M_UP" << m_averageUp << ", M_DOWN" << m_averageDown;
+    }
+  }
 }
 
 korrelator::trade_action_e MainDialog::lineCrossedOver(double const prevA,
@@ -2015,12 +2171,8 @@ void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
   QCPGraph *const graph = value.graph;
   if (minMaxNeedsUpdate) {
     QCPRange const range(keyStart, key);
-    bool foundInRange = false;
-    auto const visibleValueRange =
-        graph->getValueRange(foundInRange, QCP::sdBoth, range);
-    if (foundInRange) {
-      auto minValue = visibleValueRange.lower;
-      auto maxValue = visibleValueRange.upper;
+    double minValue = 0.0, maxValue = 0.0;
+    if (calculateSimpleGraphMinMax(graph, range, minValue, maxValue)) {
       auto const diff = (maxValue - minValue) / 11.0;
       minValue -= diff;
       maxValue += diff;
@@ -2029,6 +2181,42 @@ void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
   }
 
   graph->addData(key, result);
+  if (m_maxAverageThreshold == 0.0 || m_lastPriceAverage == 0.0)
+    return;
+  if (result > m_averageUp) {
+    makePriceAverageOrder(korrelator::trade_action_e::sell,
+                          trade_type_e::futures);
+    makePriceAverageOrder(korrelator::trade_action_e::buy, trade_type_e::spot);
+  } else if (result < m_averageDown) {
+    makePriceAverageOrder(korrelator::trade_action_e::buy,
+                          trade_type_e::futures);
+    makePriceAverageOrder(korrelator::trade_action_e::sell, trade_type_e::spot);
+  }
+}
+
+void MainDialog::makePriceAverageOrder(
+    korrelator::trade_action_e const tradeAction,
+    trade_type_e const tradeType) {
+  korrelator::cross_over_data_t crossOver;
+  crossOver.action = tradeAction;
+  double &openPrice = crossOver.openPrice;
+
+  auto const &info = m_priceDeltas[0].tradeType == tradeType ? m_priceDeltas[0]
+                                                             : m_priceDeltas[1];
+  if (info.realPrice)
+    openPrice = *info.realPrice;
+
+  crossOver.signalPrice = openPrice;
+  crossOver.time = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+
+  korrelator::model_data_t data;
+  data.symbol = info.symbolName;
+  data.marketType = tradeType == trade_type_e::futures ? "FUTURES" : "SPOT";
+  data.signalPrice = data.openPrice = openPrice;
+  data.openTime = crossOver.time;
+  data.signalTime = crossOver.time;
+  emit newPriceDeltaOrderDetected(std::move(crossOver), std::move(data),
+                                  info.exchange, info.tradeType);
 }
 
 void MainDialog::updatePlottingKey(
@@ -2122,22 +2310,27 @@ createPlugData(korrelator::trade_config_data_t *tradeConfigPtr,
 
 korrelator::trade_config_data_t *MainDialog::getTradeInfo(
     exchange_name_e const exchange, trade_type_e const tradeType,
-    korrelator::trade_action_e const action, QString const &symbol) {
-  if (!m_tradeConfigDataList.empty() &&
-      m_tradeConfigDataList[0].pricePrecision == -1)
+    korrelator::trade_action_e const action,
+    korrelator::order_origin_e const tradeOrigin, QString const &symbol) {
+  using korrelator::order_origin_e;
+  auto &dataList = tradeOrigin == order_origin_e::from_price_average
+                       ? m_priceAverageOrderData->dataList
+                       : m_normalizationOrderData->dataList;
+  if (!dataList.empty() && dataList[0].pricePrecision == -1)
     updateTradeConfigurationPrecisions();
 
-  auto configIterPair = std::equal_range(
-      m_tradeConfigDataList.begin(), m_tradeConfigDataList.end(), exchange,
-      [symbol](auto const &a, auto const &b) {
-        using a_type = std::decay_t<std::remove_cv_t<decltype(a)>>;
-        if constexpr (std::is_same_v<exchange_name_e, a_type>)
-          return std::tie(a, symbol) <
-                 std::tuple(b.exchange, b.symbol.toLower());
-        else
-          return std::tuple(a.exchange, a.symbol.toLower()) <
-                 std::tie(b, symbol);
-      });
+  auto configIterPair =
+      std::equal_range(dataList.begin(), dataList.end(), exchange,
+                       [symbol](auto const &a, auto const &b) {
+                         using a_type =
+                             std::decay_t<std::remove_cv_t<decltype(a)>>;
+                         if constexpr (std::is_same_v<exchange_name_e, a_type>)
+                           return std::tie(a, symbol) <
+                                  std::tuple(b.exchange, b.symbol.toLower());
+                         else
+                           return std::tuple(a.exchange, a.symbol.toLower()) <
+                                  std::tie(b, symbol);
+                       });
 
   auto modelDataPtr = m_model->front();
   if (configIterPair.first == configIterPair.second) {
@@ -2164,8 +2357,8 @@ korrelator::trade_config_data_t *MainDialog::getTradeInfo(
     else
       oppositeConfig.side = korrelator::trade_action_e::buy;
     oppositeConfig.oppositeSide = nullptr;
-    m_tradeConfigDataList.push_back(oppositeConfig);
-    tradeConfigPtrs.push_back(&m_tradeConfigDataList.back());
+    dataList.push_back(oppositeConfig);
+    tradeConfigPtrs.push_back(&dataList.back());
   }
 
   if (tradeConfigPtrs.size() > 2) {
@@ -2234,13 +2427,14 @@ void MainDialog::onDoubleTradeInfoGenerated(
   auto &secondTradeModelData = *modelDataPtr.friendModel;
   auto &remark = secondTradeModelData.remark;
 
-  if (iter == m_tradeConfigDataList.cend()) {
+  if (iter == dataList.cend()) {
     remark = "Unable to find second pair to trade with";
     return;
   }
 
-  auto secondTradeConfig = getTradeInfo(iter->exchange, iter->tradeType,
-                                        iter->side, iter->symbol.toLower());
+  auto secondTradeConfig =
+      getTradeInfo(iter->exchange, iter->tradeType, iter->side, tradeOrigin,
+                   iter->symbol.toLower());
   if (!secondTradeConfig)
     return;
 
@@ -2271,13 +2465,14 @@ void MainDialog::sendExchangeRequest(korrelator::model_data_t &modelData,
                                      exchange_name_e const exchange,
                                      trade_type_e const tradeType,
                                      korrelator::trade_action_e const action,
-                                     double const openPrice) {
+                                     double const openPrice,
+                                     korrelator::order_origin_e const origin) {
   auto iter = m_apiTradeApiMap.find(exchange);
   if (iter == m_apiTradeApiMap.end())
     return;
 
-  auto tradeConfigPtr =
-      getTradeInfo(exchange, tradeType, action, modelData.symbol.toLower());
+  auto tradeConfigPtr = getTradeInfo(exchange, tradeType, action, origin,
+                                     modelData.symbol.toLower());
   if (!tradeConfigPtr)
     return;
 
@@ -2290,7 +2485,7 @@ void MainDialog::sendExchangeRequest(korrelator::model_data_t &modelData,
     return;
   }
 
-  onDoubleTradeInfoGenerated(tradeConfigPtr, *iter, openPrice);
+  onDoubleTradeInfoGenerated(origin, tradeConfigPtr, *iter, openPrice);
 }
 
 void MainDialog::tradeExchangeTokens(
