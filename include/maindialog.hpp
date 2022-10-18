@@ -55,6 +55,13 @@ struct watchable_data_t {
   korrelator::token_list_t futures;
 };
 
+enum class order_origin_e {
+  from_price_normalization,
+  from_price_average,
+  from_both,
+  from_none
+};
+
 class binance_symbols;
 class kucoin_symbols;
 class ftx_symbols;
@@ -196,6 +203,18 @@ private:
       int& expectedTradeCount);
 
 private:
+  using trade_config_list_t = std::vector<korrelator::trade_config_data_t>;
+  struct average_order_data_t {
+    trade_config_list_t dataList;
+    korrelator::trade_action_e futuresLastAction;
+    korrelator::trade_action_e spotsLastAction;
+  };
+
+  struct normalized_order_data_t {
+    trade_config_list_t dataList;
+    korrelator::trade_action_e lastTradeAction;
+  };
+
   Ui::MainDialog *ui;
   QListWidget* m_currentListWidget;
   QNetworkAccessManager m_networkManager;
@@ -206,7 +225,6 @@ private:
   korrelator::token_list_t m_tokens;
   korrelator::token_list_t m_refs;
   korrelator::token_list_t m_priceDeltas;
-  std::vector<korrelator::trade_config_data_t> m_tradeConfigDataList;
   korrelator::graph_updater_t m_graphUpdater;
   korrelator::price_updater_t m_priceUpdater;
   korrelator::symbol_fetcher_t m_symbolUpdater;
@@ -215,16 +233,17 @@ private:
   korrelator::waitable_container_t<double> m_graphKeys;
   QTimer m_timerPlot;
   QElapsedTimer m_elapsedTime;
-  korrelator::trade_action_e m_lastTradeAction;
   korrelator::rot_t m_restartTickValues;
   std::filesystem::path const m_configDirectory;
-
+  std::optional<normalized_order_data_t> m_normalizationOrderData = std::nullopt;
+  std::optional<average_order_data_t> m_priceAverageOrderData = std::nullopt;
   double m_lastGraphPoint = 0.0;
   double m_threshold = 0.0;
   double m_maxVisiblePlot = 100.0;
 
   int m_maxOrderRetries = 10;
   int m_expectedTradeCount = 1; // max 2
+  korrelator::order_origin_e m_orderOrigin = korrelator::order_origin_e::from_none;
 
   bool m_doingAutoLDClosure = false; // automatic "line distance" (LD) closure
   bool m_doingManualLDClosure = false; // manualInterval LD closure
