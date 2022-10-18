@@ -16,6 +16,7 @@ struct model_data_t {
   QString openTime;
   QString side;
   QString remark;
+  QString tradeOrigin;
   double signalPrice = 0.0;
   double openPrice = 0.0;
   double exchangePrice = 0.0;
