@@ -13,24 +13,26 @@ QVariant order_model::headerData(int section, Qt::Orientation orientation,
     case 0:
       return "Correlator ID";
     case 1:
-      return "Exchange";
+      return "Origin";
     case 2:
-      return "Symbol";
+      return "Exchange";
     case 3:
-      return "Market type";
+      return "Symbol";
     case 4:
-      return "Signal price";
+      return "Market type";
     case 5:
-      return "Signal date/time";
+      return "Signal price";
     case 6:
-      return "Open price";
+      return "Signal date/time";
     case 7:
-      return "Open date/time";
+      return "Open price";
     case 8:
-      return "Side";
+      return "Open date/time";
     case 9:
-      return "Exchange price";
+      return "Side";
     case 10:
+      return "Exchange price";
+    case 11:
       return "Remarks";
     default:
       return QVariant{};
@@ -48,7 +50,7 @@ int order_model::rowCount(const QModelIndex &parent) const {
 int order_model::columnCount(const QModelIndex &parent) const {
   if (parent.isValid())
     return 0;
-  return 11;
+  return 12;
 }
 
 model_data_t* order_model::modelDataFor(QString const &orderID,
@@ -80,24 +82,26 @@ QVariant order_model::data(const QModelIndex &index, int role) const {
     case 0:
       return d.userOrderID;
     case 1:
-      return d.exchange;
+      return d.tradeOrigin;
     case 2:
-      return d.symbol;
+      return d.exchange;
     case 3:
-      return d.marketType;
+      return d.symbol;
     case 4:
-      return d.signalPrice;
+      return d.marketType;
     case 5:
-      return d.signalTime;
+      return d.signalPrice;
     case 6:
-      return d.openPrice;
+      return d.signalTime;
     case 7:
-      return d.openTime;
+      return d.openPrice;
     case 8:
-      return d.side;
+      return d.openTime;
     case 9:
-      return d.exchangePrice;
+      return d.side;
     case 10:
+      return d.exchangePrice;
+    case 11:
       return d.remark;
     default:
       return QVariant{};
