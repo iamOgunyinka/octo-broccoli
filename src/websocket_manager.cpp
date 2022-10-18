@@ -4,21 +4,9 @@
 #include "kucoin_websocket.hpp"
 #include "ftx_websocket.hpp"
 
+#include <thread>
+
 namespace korrelator {
-
-std::unique_ptr<net::io_context> &getRawIOContext() {
-  static std::unique_ptr<net::io_context> ioContext = nullptr;
-  return ioContext;
-}
-
-net::io_context *getIOContext() {
-  auto &ioContext = getRawIOContext();
-  if (!ioContext) {
-    ioContext =
-        std::make_unique<net::io_context>(std::thread::hardware_concurrency());
-  }
-  return ioContext.get();
-}
 
 net::ssl::context &getSSLContext() {
   static std::unique_ptr<net::ssl::context> ssl_context = nullptr;
@@ -31,46 +19,31 @@ net::ssl::context &getSSLContext() {
   return *ssl_context;
 }
 
-websocket_manager::websocket_manager() : m_sslContext(getSSLContext()) {
-  getRawIOContext().reset();
-  m_ioContext = getIOContext();
+websocket_manager::websocket_manager() : m_sslContext(getSSLContext()),
+  m_ioContext(new net::io_context(std::thread::hardware_concurrency()))
+{
 }
 
 websocket_manager::~websocket_manager() {
   m_ioContext->stop();
 
   for (auto &sock : m_sockets) {
-    std::visit(
-        [](auto &&v) {
-          v->requestStop();
-          delete v;
-        },
-        sock);
+    std::visit([](auto &&v) { v->requestStop(); }, sock);
+  }
+
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  for (auto &sock : m_sockets) {
+    std::visit([](auto &&v) { delete v; }, sock);
   }
 
   m_sockets.clear();
+  m_ioContext.reset();
 }
 
 void websocket_manager::addSubscription(QString const &tokenName,
                                         trade_type_e const tradeType,
                                         exchange_name_e const exchange,
                                         double &result) {
-  /*
-  auto iter = m_checker.find(exchange);
-  if (iter != m_checker.end()) {
-    auto iter2 = std::find_if(
-        iter->second.begin(), iter->second.end(),
-        [tradeType, tokenName](auto const &a) {
-          return a.tokenName.compare(tokenName, Qt::CaseInsensitive) == 0 &&
-                 tradeType == a.tradeType;
-        });
-    if (iter2 != iter->second.end())
-      return;
-    iter->second.push_back({tradeType, tokenName});
-  } else {
-    m_checker[exchange].push_back({tradeType, tokenName});
-  }
-  */
   if (exchange == exchange_name_e::binance) {
     auto sock = new binance_ws(*m_ioContext, m_sslContext, result, tradeType);
     sock->addSubscription(tokenName.toLower());
@@ -103,8 +76,6 @@ void websocket_manager::addSubscription(QString const &tokenName,
 }
 
 void websocket_manager::startWatch() {
-  m_checker.clear();
-
   for (auto &sock : m_sockets) {
     std::visit(
         [this](auto &&v) mutable {

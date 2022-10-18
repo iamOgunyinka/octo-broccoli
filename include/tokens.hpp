@@ -7,6 +7,7 @@
 #include <optional>
 #include <vector>
 #include <functional>
+#include <memory>
 
 class QCPGraph;
 class QCPLayoutGrid;
@@ -35,12 +36,12 @@ public:
   double prevNormalizedPrice = std::numeric_limits<double>::max();
   double alpha = 1.0;
   double normalizedPrice = 0.0;
-  double realPrice = 0.0;
   double multiplier = 1.0; // only used by kucoin
   double tickSize = 0.0; // used as the stepSize in Binance
   double baseMinSize = 0.0; // The minimum quantity requried to place an order
   double quoteMinSize = 0.0; // The minimum funds required to place a market order
   qint64 graphPointsDrawnCount = 0;
+  std::shared_ptr<double> realPrice;
   QCPGraph *graph = nullptr;
 
   std::optional<cross_over_data_t> crossOver;

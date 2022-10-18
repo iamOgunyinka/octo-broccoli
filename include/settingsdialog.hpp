@@ -17,10 +17,12 @@ class SettingsDialog : public QDialog
 
 public:
   using api_data_map_t = QMap<korrelator::exchange_name_e, korrelator::api_data_t>;
-  explicit SettingsDialog(QWidget *parent = nullptr);
+  explicit SettingsDialog(std::string const &directory,
+                          QString const &title,
+                          QWidget *parent = nullptr);
   ~SettingsDialog();
 
-  static api_data_map_t getApiDataMap();
+  static api_data_map_t getApiDataMap(std::string const &directory);
   auto& apiDataMap() { return m_apiInfo; }
 
 private:
@@ -36,5 +38,6 @@ private:
   Ui::SettingsDialog *ui;
   api_data_map_t m_apiInfo;
   std::string m_key;
+  std::string const m_directory;
 };
 

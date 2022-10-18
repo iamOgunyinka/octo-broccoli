@@ -2,19 +2,53 @@ QT       += core gui network websockets printsupport
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
-CONFIG += c++17
-INCLUDEPATH += "include"
-INCLUDEPATH += "third-party/rapidjson/include"
-INCLUDEPATH += "E:\\boost_1_78_0\\include" \
-               "E:\\vcpkg\\installed\\x64-windows\\include"
+CONFIG += c++17 force_debug_info
 
-Debug:LIBS += "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libcrypto.lib" \
-              "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libssl.lib" \
-              "E:\\vcpkg\\installed\\x64-windows\\debug\\lib\\libsodium.lib"
+VCPKG_PATH = D:\\vcpkg\\installed\\x64-windows
+VCPKG_DEBUG_LPATH = $${VCPKG_PATH}\\debug\\lib
+VCPKG_REL_LPATH = $${VCPKG_PATH}\\lib
 
-Release:LIBS += "E:\\vcpkg\\installed\\x64-windows\\lib\\libcrypto.lib" \
-              "E:\\vcpkg\\installed\\x64-windows\\lib\\libssl.lib" \
-              "E:\\vcpkg\\installed\\x64-windows\\lib\\libsodium.lib"
+win32:{
+  INCLUDEPATH += "include" \
+                 "third-party/rapidjson/include" \
+                 "D:\\boost_1_78\\include" \
+                 $${VCPKG_PATH}\\include
+} else {
+
+
+}
+
+
+CONFIG(debug, debug|release):{
+  win32: {
+    LIBS += \
+            $${VCPKG_DEBUG_LPATH}\\libcrypto.lib \
+            $${VCPKG_DEBUG_LPATH}\\libssl.lib \
+            $${VCPKG_DEBUG_LPATH}\\libsodium.lib \
+            User32.lib \
+            Advapi32.lib \
+
+
+  } else {
+  # intended for any OS other than Windows
+    LIBS +=
+  }
+}
+
+CONFIG(release, debug|release): {
+  win32: {
+    LIBS += $${VCPKG_REL_LPATH}\\libcrypto.lib \
+            $${VCPKG_REL_LPATH}\\libssl.lib \
+            $${VCPKG_REL_LPATH}\\libsodium.lib \
+            User32.lib \
+            Advapi32.lib \
+
+  } else {
+# intended for any OS other than Windows
+    LIBS +=
+  }
+}
+
 
 QMAKE_CXXFLAGS += -bigobj
 # DEFINES += TESTNET=1
@@ -24,7 +58,10 @@ QMAKE_CXXFLAGS += -bigobj
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
+  src/double_trader.cpp \
+  src/mainwindow.cpp \
   src/binance_symbols.cpp \
+  src/crashreportdialog.cpp \
   src/ftx_futures_plug.cpp \
   src/ftx_https_request.cpp \
   src/ftx_spots_plug.cpp \
@@ -45,10 +82,14 @@ SOURCES += main.cpp \
   src/maindialog.cpp \
   src/order_model.cpp \
   src/qcustomplot.cpp \
+  src/single_trader.cpp \
   src/uri.cpp \
-  src/websocket_manager.cpp
+  src/websocket_manager.cpp \
+  src/windows_specifics.cpp
 
 HEADERS += include/binance_symbols.hpp \
+  include/crashreportdialog.hpp \
+  include/double_trader.hpp \
   include/ftx_futures_plug.hpp \
   include/ftx_https_request.hpp \
   include/ftx_spots_plug.hpp \
@@ -67,19 +108,26 @@ HEADERS += include/binance_symbols.hpp \
   include/kucoin_websocket.hpp \
   include/maindialog.hpp \
   include/order_model.hpp \
+  include/plug_data.hpp \
   include/qcustomplot.h \
+  include/single_trader.hpp \
   include/sthread.hpp \
   include/uri.hpp \
   include/utils.hpp \
   include/tokens.hpp \
   include/websocket_manager.hpp \
   include/settingsdialog.hpp \
-  include/kucoin_symbols.hpp
+  include/kucoin_symbols.hpp \
+  include/mainwindow.hpp
 
 FORMS += ui/settingsdialog.ui \
+    ui/crashreportdialog.ui \
+    ui/mainwindow.ui \
     ui/maindialog.ui
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
 elsD: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
+
+RESOURCES += resources/image_resouce.qrc

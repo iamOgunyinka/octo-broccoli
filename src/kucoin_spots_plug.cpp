@@ -11,8 +11,6 @@
 #include <rapidjson/writer.h>
 #include <thread>
 
-extern double maxOrderRetries;
-
 namespace korrelator {
 
 bool normalizeQuoteAmount(trade_config_data_t* tradeConfig) {
@@ -233,14 +231,15 @@ void kucoin_spots_plug::performSSLHandshake() {
 kucoin_spots_plug::kucoin_spots_plug(net::io_context &ioContext,
                              ssl::context &sslContext,
                              api_data_t const &apiData,
-                             trade_config_data_t *tradeConfig)
+                             trade_config_data_t *tradeConfig,
+                             int const errorMaxRetries)
     : m_tradeAction(tradeConfig->side), m_ioContext(ioContext),
       m_sslContext(sslContext), m_tradeConfig(tradeConfig),
       m_apiKey(apiData.spotApiKey.toStdString()),
       m_apiSecret(apiData.spotApiSecret.toStdString()),
       m_apiPassphrase(apiData.spotApiPassphrase.toStdString()),
       m_tcpStream(ioContext, sslContext),
-      m_resolver(ioContext) {}
+      m_resolver(ioContext), m_errorMaxRetries(errorMaxRetries) {}
 
 kucoin_spots_plug::~kucoin_spots_plug() {
   m_readBuffer.reset();
@@ -379,7 +378,7 @@ void kucoin_spots_plug::parseSuccessfulResponse(JsonObject const &dataObject ) {
   }
 
   if (totalFunds == 0.0 || totalSize == 0.0) {
-    if (++m_numberOfRetries >= maxOrderRetries) {
+    if (++m_numberOfRetries >= m_errorMaxRetries) {
       m_numberOfRetries = 0;
       return reportError("Unable to check status of order made");
     }
@@ -417,7 +416,7 @@ void kucoin_spots_plug::startMonitoringLastOrder() {
 }
 
 void kucoin_spots_plug::initiateLimitOrder() {
-  if (++m_numberOfRetries > (int)maxOrderRetries) {
+  if (++m_numberOfRetries > m_errorMaxRetries) {
     m_errorString = "Maximum number of retries";
     return;
   }

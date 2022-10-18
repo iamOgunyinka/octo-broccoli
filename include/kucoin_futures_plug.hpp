@@ -33,6 +33,7 @@ class kucoin_futures_plug {
   };
 
   process_e m_process;
+  int const m_errorMaxRetries = 0;
   int m_numberOfRetries = 0;
   double m_price = 0.0;
 
@@ -70,7 +71,8 @@ private:
 
 public:
   kucoin_futures_plug(net::io_context &, ssl::context &,
-                  api_data_t const &apiData, trade_config_data_t*);
+                      api_data_t const &apiData, trade_config_data_t*,
+                      int const errorMaxRetries);
 
   ~kucoin_futures_plug();
   void setPrice(double const price) { m_price = price; }
