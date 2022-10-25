@@ -1728,6 +1728,58 @@ bool MainDialog::validateUserInput() {
     return false;
   }
 
+  if (int const count = ui->priceDiffListWidget->count();
+      count != 0 && count != 2) {
+    static char const *const errMessage =
+        "The futures/spot price widget list needs "
+        "to be empty or at most 2. One FUTURES and one SPOT token";
+    QMessageBox::critical(this, tr("Error"), tr(errMessage));
+    return false;
+  } else {
+    if (count > 0) {
+      bool futuresIsSet = false;
+      bool spotIsSet = false;
+
+      for (int i = 0; i < count; ++i) {
+        auto const &data =
+            tokenNameFromWidgetName(ui->priceDiffListWidget->item(i)->text());
+        if (data.tradeType == trade_type_e::futures)
+          futuresIsSet = true;
+        else if (data.tradeType == trade_type_e::spot)
+          spotIsSet = true;
+      }
+      if (!futuresIsSet) {
+        QMessageBox::critical(
+            this, tr("Error"),
+            tr("You need a FUTURES token in the price widget"));
+        return false;
+      }
+      if (!spotIsSet) {
+        QMessageBox::critical(this, tr("Error"),
+                              tr("You need a SPOT token in the price widget"));
+        return false;
+      }
+    }
+  }
+
+  if (ui->liveTradeCheckbox->isChecked()) {
+    bool refFound = false;
+    bool normalTokenFound = false;
+
+    for (int i = 0; i < ui->tokenListWidget->count(); ++i) {
+      auto const &tokenName = ui->tokenListWidget->item(i)->text();
+      if (tokenName.endsWith('*'))
+        refFound = true;
+      else
+        normalTokenFound = true;
+    }
+    if (!refFound || !normalTokenFound) {
+      QMessageBox::critical(this, tr("Error"),
+                            tr("You need at least one REF and"
+                               " one NORMAL token"));
+      return false;
+    }
+  }
   return true;
 }
 
