@@ -90,6 +90,7 @@ MainWindow::~MainWindow()
   delete m_reloadTradeAction;
   delete m_aboutAction;
   delete m_newDialogAction;
+  delete m_howToAction;
 
   m_workSpace.reset();
   delete ui;
@@ -125,12 +126,18 @@ void MainWindow::createActions() {
                    &MainWindow::onReloadTradeConfigTriggered);
 
   m_aboutAction = new QAction("&About");
-  m_aboutAction->setShortcut(QKeySequence("F1"));
+  m_aboutAction->setShortcut(QKeySequence("F2"));
   m_aboutAction->setToolTip("Show the software information used for"
                                   " developing this software");
   m_aboutAction->setIcon(QIcon(":/image/images/about.png"));
   QObject::connect(m_aboutAction, &QAction::triggered, qApp,
                    &QApplication::aboutQt);
+
+  m_howToAction = new QAction("&Using Correlator");
+  m_howToAction->setShortcut(QKeySequence("F1"));
+  m_howToAction->setToolTip("Explain in detail how to use this correlator program");
+  m_howToAction->setIcon(QIcon(":/image/images/howTo.png"));
+  QObject::connect(m_howToAction, &QAction::triggered, this, &MainWindow::ShowHowToWindow);
 }
 
 MainDialog* MainWindow::getActiveDialog() {
@@ -186,6 +193,7 @@ void MainWindow::createMenus() {
   editMenu->addAction(m_preferenceAction);
 
   auto helpMenu = menuBar()->addMenu("&Help");
+  helpMenu->addAction(m_howToAction);
   helpMenu->addAction(m_aboutAction);
 }
 
@@ -236,4 +244,9 @@ void MainWindow::ShowCrashUI(QString const &filename)
     delete dialog;
   });
   dialog->show();
+}
+
+void MainWindow::ShowHowToWindow()
+{
+
 }
