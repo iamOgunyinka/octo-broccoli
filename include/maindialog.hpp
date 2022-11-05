@@ -139,7 +139,7 @@ private:
   void takeBackToFactoryReset();
   void onOKButtonClicked();
   void onStartVerificationSuccessful();
-  void stopGraphPlotting();
+  void stopGraphPlotting(bool const requestConfirmation);
   void saveAppConfigToFile();
   void readAppConfigFromFile();
   void updateKuCoinTradeConfiguration();
@@ -205,6 +205,7 @@ private:
                                   double const openPrice);
   void makePriceAverageOrder(korrelator::trade_action_e const tradeAction,
                              korrelator::trade_type_e const tradeType);
+  void onExportButtonClicked();
   void OnTradeAverageRadioToggled(bool const);
   void OnTradeBothAverageNormalToggled(bool const);
   void OnTradeNormalizedPriceToggled(bool const);
