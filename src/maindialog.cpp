@@ -48,6 +48,30 @@ QString marketTypeToString(market_type_e const m) {
   return "unknown";
 }
 
+QString tradeTypeToString(trade_type_e const t) {
+  if (t == trade_type_e::futures)
+    return "Futures";
+  else if (t == trade_type_e::spot)
+    return "Spot";
+  return "Unknown";
+}
+
+trade_action_e stringToTradeAction(QString const &s) {
+  if (s.contains("buy", Qt::CaseInsensitive))
+    return trade_action_e::buy;
+  else if (s.contains("sell", Qt::CaseInsensitive))
+    return trade_action_e::sell;
+  return trade_action_e::nothing;
+}
+
+trade_type_e stringToTradeType(QString const &t) {
+  if (t.compare("futures", Qt::CaseInsensitive) == 0)
+    return trade_type_e::futures;
+  else if (t.contains("spot", Qt::CaseInsensitive))
+    return trade_type_e::spot;
+  return trade_type_e::unknown;
+}
+
 market_type_e stringToMarketType(QString const &m) {
   if (m.compare("market") == 0)
     return market_type_e::market;
@@ -228,7 +252,7 @@ void MainDialog::connectRestartTickSignal() {
 }
 
 MainDialog::~MainDialog() {
-  stopGraphPlotting();
+  stopGraphPlotting(false);
   resetGraphComponents();
   m_websocket.reset();
   saveAppConfigToFile();
@@ -307,6 +331,9 @@ void MainDialog::populateUIComponents() {
   ui->legendPositionCombo->addItems(
       {"Top Left", "Top Right", "Bottom Left", "Bottom Right"});
   ui->graphThicknessCombo->addItems({"1", "2", "3", "4", "5"});
+  ui->exportExchangeCombo->addItems({"All", "Binance", "FTX", "KuCoin"});
+  ui->exportSideCombo->addItems({"All", "BUY", "SELL"});
+  ui->exportMarketTypeCombo->addItems({"All", "Spot", "Futures"});
   ui->umbralLine->setValidator(new QDoubleValidator);
   ui->umbralLine->setText("5");
   ui->oneOpCheckBox->setChecked(true);
@@ -393,6 +420,8 @@ void MainDialog::connectAllUISignals() {
 
   QObject::connect(ui->applySpecialButton, &QPushButton::clicked, this,
                    &MainDialog::onApplyButtonClicked);
+  QObject::connect(ui->exportButton, &QPushButton::clicked, this,
+                   &MainDialog::onExportButtonClicked);
   QObject::connect(this, &MainDialog::newOrderDetected, this,
                    [this](auto a, auto b, exchange_name_e const exchange,
                           trade_type_e const tt) {
@@ -428,8 +457,10 @@ void MainDialog::connectAllUISignals() {
         m_maxVisiblePlot = getMaxPlotsInVisibleRegion();
         if (!m_programIsRunning) {
           double const key = m_elapsedTime.elapsed() / 1'000.0;
-          ui->customPlot->xAxis->setRange(key, m_maxVisiblePlot, Qt::AlignRight);
-          ui->priceDeltaPlot->xAxis->setRange(key, m_maxVisiblePlot, Qt::AlignRight);
+          ui->customPlot->xAxis->setRange(key, m_maxVisiblePlot,
+                                          Qt::AlignRight);
+          ui->priceDeltaPlot->xAxis->setRange(key, m_maxVisiblePlot,
+                                              Qt::AlignRight);
           ui->customPlot->replot();
           ui->priceDeltaPlot->replot();
         }
@@ -629,7 +660,14 @@ void MainDialog::enableUIComponents(bool const enabled) {
   ui->averageGroupbox->setEnabled(enabled);
 }
 
-void MainDialog::stopGraphPlotting() {
+void MainDialog::stopGraphPlotting(bool const requestConfirmation) {
+
+  if (requestConfirmation) {
+    if (QMessageBox::question(this, "Stop", "Continue with stopping it?") ==
+        QMessageBox::No)
+      return;
+  }
+
   m_timerPlot.stop();
   m_graphPlotter.timer.stop();
 
@@ -1549,8 +1587,9 @@ void MainDialog::setupPriceDeltaGraphData() {
     value.graph->setPen(
         QPen(color, ui->graphThicknessCombo->currentIndex() + 1));
     value.graph->setAntialiasedFill(true);
-    value.legendName = legendName(value.symbolName, value.tradeType) + " / "
-        + legendName(m_priceDeltas[1].symbolName, m_priceDeltas[1].tradeType);
+    value.legendName =
+        legendName(value.symbolName, value.tradeType) + " / " +
+        legendName(m_priceDeltas[1].symbolName, m_priceDeltas[1].tradeType);
     value.graph->setName(value.legendName);
     value.graph->setLineStyle(QCPGraph::lsLine);
   }
@@ -1785,7 +1824,8 @@ bool MainDialog::validateUserInput() {
     }
   }
 
-  m_calculatingNormalPrice = m_orderOrigin == korrelator::order_origin_e::from_both ||
+  m_calculatingNormalPrice =
+      m_orderOrigin == korrelator::order_origin_e::from_both ||
       m_orderOrigin == korrelator::order_origin_e::from_price_normalization;
   return true;
 }
@@ -1839,7 +1879,7 @@ void MainDialog::onOKButtonClicked() {
     return;
 
   if (m_programIsRunning)
-    return stopGraphPlotting();
+    return stopGraphPlotting(true);
 
   if (!validateUserInput())
     return;
@@ -2170,12 +2210,11 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
           QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
       data.signalTime = crossOverValue.time;
 
-      if (m_calculatingNormalPrice)
-      {
-          emit newOrderDetected(std::move(crossOverValue), std::move(data),
-                                value.exchange, value.tradeType);
+      if (m_calculatingNormalPrice) {
+        emit newOrderDetected(std::move(crossOverValue), std::move(data),
+                              value.exchange, value.tradeType);
       } else {
-         qDebug() << "Man, how did we get here again?";
+        qDebug() << "Man, how did we get here again?";
       }
       value.crossedOver = false;
       value.crossOver.reset();
@@ -2322,7 +2361,8 @@ void MainDialog::updatePlottingKey() {
   // make `key` axis range scroll right with the data at a
   // constant range of `maxVisiblePlot`, set by the user
   ui->customPlot->xAxis->setRange(lastKey, m_maxVisiblePlot, Qt::AlignRight);
-  ui->priceDeltaPlot->xAxis->setRange(lastKey, m_maxVisiblePlot, Qt::AlignRight);
+  ui->priceDeltaPlot->xAxis->setRange(lastKey, m_maxVisiblePlot,
+                                      Qt::AlignRight);
   ui->customPlot->replot();
   ui->priceDeltaPlot->replot();
 }
@@ -2598,4 +2638,97 @@ void MainDialog::tradeExchangeTokens(
       doubleTrade(std::move(firstMetadata), std::move(secondMetadata));
     }
   }
+}
+
+std::vector<korrelator::model_data_t>
+filterByExchange(std::vector<korrelator::model_data_t> data,
+                 int const exchangeIndex) {
+  if (exchangeIndex == 0) // ALL
+    return data;
+
+  auto const exchange = static_cast<exchange_name_e>(exchangeIndex - 1);
+  data.erase(std::remove_if(data.begin(), data.end(),
+                            [exchange](korrelator::model_data_t const &d) {
+                              return exchange !=
+                                     korrelator::stringToExchangeName(
+                                         d.exchange);
+                            }),
+             data.end());
+  return data;
+}
+
+std::vector<korrelator::model_data_t>
+filterByMarketType(std::vector<korrelator::model_data_t> data,
+                   int const marketTypeIndex) {
+  if (marketTypeIndex == 0) // ALL
+    return data;
+  auto const tradeType = static_cast<trade_type_e>(marketTypeIndex - 1);
+  data.erase(std::remove_if(data.begin(), data.end(),
+                            [tradeType](korrelator::model_data_t const &d) {
+                              return tradeType != korrelator::stringToTradeType(
+                                                      d.marketType);
+                            }),
+             data.end());
+  return data;
+}
+
+std::vector<korrelator::model_data_t>
+filterByTradeSide(std::vector<korrelator::model_data_t> data,
+                  int const sideIndex) {
+  if (sideIndex == 0)
+    return data;
+  auto const side = static_cast<korrelator::trade_action_e>(sideIndex - 1);
+
+  data.erase(std::remove_if(data.begin(), data.end(),
+                            [side](korrelator::model_data_t const &d) {
+                              return side !=
+                                     korrelator::stringToTradeAction(d.side);
+                            }),
+             data.end());
+  return data;
+}
+
+void MainDialog::onExportButtonClicked() {
+  if (!m_model || m_model->totalRows() == 0) {
+    QMessageBox::critical(this, "Error", "There is nothing to export");
+    return;
+  }
+  auto const allItems = filterByTradeSide(
+      filterByMarketType(
+          filterByExchange(m_model->allItems(),
+                           ui->exportExchangeCombo->currentIndex()),
+          ui->exportMarketTypeCombo->currentIndex()),
+      ui->exportSideCombo->currentIndex());
+  if (allItems.empty()) {
+    QMessageBox::information(this, "Error", "The filters returned no data");
+    return;
+  }
+
+  auto const fileName =
+      QFileDialog::getSaveFileName(this, "Save as", "", "CSV Files(*.csv)");
+  if (fileName.isEmpty())
+    return;
+  QFile file(fileName);
+  if (!file.open(QIODevice::WriteOnly)) {
+    QMessageBox::critical(
+        this, tr("Error"),
+        tr("Unable to open file because %1").arg(file.errorString()));
+    return;
+  }
+  QTextStream textStream(&file);
+  textStream
+      << "Exchange, OrderID, SymbolName, MarketType, SignalTime, OpenTime, "
+         "Side, Remark, TradeOrigin, SignalPrice, OpenPrice, ExchangePrice\n";
+
+  for (auto const &data : allItems) {
+    textStream << data.exchange << ", " << data.userOrderID << ", "
+               << data.symbol.toUpper() << ", " << data.marketType << ", "
+               << data.signalTime << ", " << data.openTime << ", " << data.side
+               << ", " << data.remark << ", " << data.tradeOrigin << ", "
+               << data.signalPrice << ", " << data.openPrice << ", "
+               << data.exchangePrice << "\n";
+  }
+  file.close();
+  QMessageBox::information(
+      this, tr("Done"), tr("File successfully exported into %1").arg(fileName));
 }
