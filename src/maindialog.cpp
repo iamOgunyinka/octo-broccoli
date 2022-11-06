@@ -173,11 +173,6 @@ MainDialog::MainDialog(bool &warnOnExit,
                         m_expectedTradeCount);
   }}.detach();
 
-  std::thread{[this] {
-    updatePlottingKey(m_graphKeys, ui->customPlot, ui->priceDeltaPlot,
-                      m_maxVisiblePlot);
-  }}.detach();
-
   QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
     for (auto const &exchange :
          {exchange_name_e::ftx, exchange_name_e::kucoin}) {
@@ -433,9 +428,10 @@ void MainDialog::connectAllUISignals() {
         m_maxVisiblePlot = getMaxPlotsInVisibleRegion();
         if (!m_programIsRunning) {
           double const key = m_elapsedTime.elapsed() / 1'000.0;
-          ui->customPlot->xAxis->setRange(key, m_maxVisiblePlot,
-                                          Qt::AlignRight);
+          ui->customPlot->xAxis->setRange(key, m_maxVisiblePlot, Qt::AlignRight);
+          ui->priceDeltaPlot->xAxis->setRange(key, m_maxVisiblePlot, Qt::AlignRight);
           ui->customPlot->replot();
+          ui->priceDeltaPlot->replot();
         }
       });
 
@@ -485,6 +481,9 @@ void MainDialog::connectAllUISignals() {
     if (m_findingUmbral)
       m_threshold /= 100.0;
   });
+
+  QObject::connect(&m_graphPlotter.timer, &QTimer::timeout, this,
+                   &MainDialog::updatePlottingKey);
   ConnectAllTradeRadioSignals(true);
 }
 
@@ -632,6 +631,7 @@ void MainDialog::enableUIComponents(bool const enabled) {
 
 void MainDialog::stopGraphPlotting() {
   m_timerPlot.stop();
+  m_graphPlotter.timer.stop();
 
   ui->futuresNextButton->setEnabled(true);
   ui->spotNextButton->setEnabled(true);
@@ -656,6 +656,7 @@ void MainDialog::stopGraphPlotting() {
   }
 
   enableUIComponents(true);
+  m_calculatingNormalPrice = true;
 
   korrelator::plug_data_t data;
   data.tradeType = trade_type_e::unknown;
@@ -665,6 +666,8 @@ void MainDialog::stopGraphPlotting() {
   if (m_averagePriceDifferenceTimer &&
       m_averagePriceDifferenceTimer->isActive()) {
     m_averagePriceDifferenceTimer->stop();
+    m_averagePriceDifferenceTimer->disconnect(this);
+
     delete m_averagePriceDifferenceTimer;
     m_averagePriceDifferenceTimer = nullptr;
   }
@@ -1546,7 +1549,8 @@ void MainDialog::setupPriceDeltaGraphData() {
     value.graph->setPen(
         QPen(color, ui->graphThicknessCombo->currentIndex() + 1));
     value.graph->setAntialiasedFill(true);
-    value.legendName = legendName(value.symbolName, value.tradeType);
+    value.legendName = legendName(value.symbolName, value.tradeType) + " / "
+        + legendName(m_priceDeltas[1].symbolName, m_priceDeltas[1].tradeType);
     value.graph->setName(value.legendName);
     value.graph->setLineStyle(QCPGraph::lsLine);
   }
@@ -1728,6 +1732,61 @@ bool MainDialog::validateUserInput() {
     return false;
   }
 
+  if (int const count = ui->priceDiffListWidget->count();
+      count != 0 && count != 2) {
+    static char const *const errMessage =
+        "The futures/spot price widget list needs "
+        "to be empty or at most 2. One FUTURES and one SPOT token";
+    QMessageBox::critical(this, tr("Error"), tr(errMessage));
+    return false;
+  } else {
+    if (count > 0) {
+      bool futuresIsSet = false;
+      bool spotIsSet = false;
+
+      for (int i = 0; i < count; ++i) {
+        auto const &data =
+            tokenNameFromWidgetName(ui->priceDiffListWidget->item(i)->text());
+        if (data.tradeType == trade_type_e::futures)
+          futuresIsSet = true;
+        else if (data.tradeType == trade_type_e::spot)
+          spotIsSet = true;
+      }
+      if (!futuresIsSet) {
+        QMessageBox::critical(
+            this, tr("Error"),
+            tr("You need a FUTURES token in the price widget"));
+        return false;
+      }
+      if (!spotIsSet) {
+        QMessageBox::critical(this, tr("Error"),
+                              tr("You need a SPOT token in the price widget"));
+        return false;
+      }
+    }
+  }
+
+  if (ui->liveTradeCheckbox->isChecked()) {
+    bool refFound = false;
+    bool normalTokenFound = false;
+
+    for (int i = 0; i < ui->tokenListWidget->count(); ++i) {
+      auto const &tokenName = ui->tokenListWidget->item(i)->text();
+      if (tokenName.endsWith('*'))
+        refFound = true;
+      else
+        normalTokenFound = true;
+    }
+    if (!refFound || !normalTokenFound) {
+      QMessageBox::critical(this, tr("Error"),
+                            tr("You need at least one REF and"
+                               " one NORMAL token"));
+      return false;
+    }
+  }
+
+  m_calculatingNormalPrice = m_orderOrigin == korrelator::order_origin_e::from_both ||
+      m_orderOrigin == korrelator::order_origin_e::from_price_normalization;
   return true;
 }
 
@@ -1933,6 +1992,7 @@ void MainDialog::startWebsocket() {
                      &MainDialog::calculateAveragePriceDifference);
     m_averagePriceDifferenceTimer->start();
   }
+  m_graphPlotter.timer.start(std::chrono::milliseconds(300));
 }
 
 bool calculateSimpleGraphMinMax(QCPGraph *graph, QCPRange const &range,
@@ -2110,8 +2170,13 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
           QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
       data.signalTime = crossOverValue.time;
 
-      emit newOrderDetected(std::move(crossOverValue), std::move(data),
-                            value.exchange, value.tradeType);
+      if (m_calculatingNormalPrice)
+      {
+          emit newOrderDetected(std::move(crossOverValue), std::move(data),
+                                value.exchange, value.tradeType);
+      } else {
+         qDebug() << "Man, how did we get here again?";
+      }
       value.crossedOver = false;
       value.crossOver.reset();
     }
@@ -2172,7 +2237,9 @@ void MainDialog::onNormalizedGraphTimerTick(bool const updatingMinMax,
   calculatePriceNormalization();
   updateGraphData(key, updatingMinMax);
 
-  m_graphKeys.append(key);
+  m_graphPlotter.mutex.lock();
+  m_graphPlotter.lastKey = key;
+  m_graphPlotter.mutex.unlock();
 }
 
 void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
@@ -2247,27 +2314,17 @@ void MainDialog::makePriceAverageOrder(
                                   info.exchange, info.tradeType);
 }
 
-void MainDialog::updatePlottingKey(
-    korrelator::waitable_container_t<double> &graphKeys,
-    QCustomPlot *customPlot, QCustomPlot *priceDeltaPlot,
-    double &maxVisiblePlot) {
-  double key = 0.0;
-  while (true) {
-    try {
-      key = graphKeys.get();
-    } catch (std::exception const &e) {
-      qDebug() << e.what();
-      continue;
-    }
+void MainDialog::updatePlottingKey() {
+  m_graphPlotter.mutex.lock();
+  auto const lastKey = m_graphPlotter.lastKey;
+  m_graphPlotter.mutex.unlock();
 
-    // make `key` axis range scroll right with the data at a
-    // constant range of `maxVisiblePlot`, set by the user
-    customPlot->xAxis->setRange(key, maxVisiblePlot, Qt::AlignRight);
-    customPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
-
-    priceDeltaPlot->xAxis->setRange(key, maxVisiblePlot, Qt::AlignRight);
-    priceDeltaPlot->replot(QCustomPlot::RefreshPriority::rpQueuedReplot);
-  }
+  // make `key` axis range scroll right with the data at a
+  // constant range of `maxVisiblePlot`, set by the user
+  ui->customPlot->xAxis->setRange(lastKey, m_maxVisiblePlot, Qt::AlignRight);
+  ui->priceDeltaPlot->xAxis->setRange(lastKey, m_maxVisiblePlot, Qt::AlignRight);
+  ui->customPlot->replot();
+  ui->priceDeltaPlot->replot();
 }
 
 void MainDialog::resetTickerData(const bool resetRefs,

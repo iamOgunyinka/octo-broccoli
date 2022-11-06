@@ -209,11 +209,8 @@ private:
   void OnTradeBothAverageNormalToggled(bool const);
   void OnTradeNormalizedPriceToggled(bool const);
   void ConnectAllTradeRadioSignals(bool const);
+  void updatePlottingKey();
 
-  static void updatePlottingKey(korrelator::waitable_container_t<double>&,
-                                QCustomPlot* customPlot,
-                                QCustomPlot* priceDeltaPlot,
-                                double& maxVisiblePlot);
   static void tradeExchangeTokens(
       std::function<void()> refreshModel,
       korrelator::waitable_container_t<korrelator::plug_data_t>&,
@@ -233,6 +230,12 @@ private:
     korrelator::trade_action_e lastTradeAction;
   };
 
+  struct plot_graph_data_t {
+    double lastKey;
+    std::mutex mutex;
+    QTimer timer;
+  };
+
   Ui::MainDialog *ui;
   QListWidget* m_currentListWidget;
   QTimer *m_averagePriceDifferenceTimer = nullptr;
@@ -249,7 +252,7 @@ private:
   korrelator::symbol_fetcher_t m_symbolUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout;
   korrelator::waitable_container_t<korrelator::plug_data_t> m_tokenPlugs;
-  korrelator::waitable_container_t<double> m_graphKeys;
+  plot_graph_data_t m_graphPlotter;
   QTimer m_timerPlot;
   QElapsedTimer m_elapsedTime;
   korrelator::rot_t m_restartTickValues;
@@ -276,6 +279,7 @@ private:
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;
   bool m_tradeOpened = false;
+  bool m_calculatingNormalPrice = true;
   bool& m_warnOnExit;
 };
 
