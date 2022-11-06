@@ -58,6 +58,7 @@ QMAKE_CXXFLAGS += -bigobj
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += main.cpp \
+  src/helpdialog.cpp \
   src/double_trader.cpp \
   src/mainwindow.cpp \
   src/binance_symbols.cpp \
@@ -88,6 +89,7 @@ SOURCES += main.cpp \
   src/windows_specifics.cpp
 
 HEADERS += include/binance_symbols.hpp \
+  include/helpdialog.hpp \
   include/crashreportdialog.hpp \
   include/double_trader.hpp \
   include/ftx_futures_plug.hpp \
@@ -121,6 +123,7 @@ HEADERS += include/binance_symbols.hpp \
   include/mainwindow.hpp
 
 FORMS += ui/settingsdialog.ui \
+    ui/helpdialog.ui \
     ui/crashreportdialog.ui \
     ui/mainwindow.ui \
     ui/maindialog.ui
@@ -130,4 +133,5 @@ qnx: target.path = /tmp/$${TARGET}/bin
 elsD: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
-RESOURCES += resources/image_resouce.qrc
+RESOURCES += resources/image_resouce.qrc \
+  resources/help.qrc
