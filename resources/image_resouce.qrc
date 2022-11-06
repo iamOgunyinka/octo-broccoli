@@ -6,5 +6,18 @@
         <file>images/refresh.png</file>
         <file>images/settings.png</file>
         <file>images/howTo.png</file>
+        <file>images/helpDir/eigth.png</file>
+        <file>images/helpDir/eleventh.png</file>
+        <file>images/helpDir/fifth.png</file>
+        <file>images/helpDir/first.png</file>
+        <file>images/helpDir/fourth.png</file>
+        <file>images/helpDir/ninth.png</file>
+        <file>images/helpDir/second.png</file>
+        <file>images/helpDir/seventh.png</file>
+        <file>images/helpDir/sixth.png</file>
+        <file>images/helpDir/tenth.png</file>
+        <file>images/helpDir/third.png</file>
+        <file>images/helpDir/thirteenth.png</file>
+        <file>images/helpDir/twelveth.png</file>
     </qresource>
 </RCC>

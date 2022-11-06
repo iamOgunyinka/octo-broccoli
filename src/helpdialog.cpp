@@ -13,7 +13,7 @@ HelpDialog::HelpDialog(QWidget *parent) :
   file.close();
 
   ui->label->setWordWrap(true);
-  ui->label->setText(fileContent);
+  ui->label->setText(fileContent);  
 }
 
 HelpDialog::~HelpDialog()
