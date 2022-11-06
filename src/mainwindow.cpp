@@ -11,6 +11,7 @@
 
 #include "constants.hpp"
 #include "crashreportdialog.hpp"
+#include "helpdialog.hpp"
 #include "maindialog.hpp"
 
 namespace korrelator {
@@ -248,5 +249,17 @@ void MainWindow::ShowCrashUI(QString const &filename)
 
 void MainWindow::ShowHowToWindow()
 {
+  auto dialog = new HelpDialog(this);
+  auto subWindow = m_workSpace->addSubWindow(dialog);
+  subWindow->setAttribute(Qt::WA_DeleteOnClose);
+  subWindow->setWindowTitle(dialog->windowTitle());
 
+  QObject::connect(dialog, &HelpDialog::finished, subWindow,
+                   &QMdiSubWindow::close);
+  QObject::connect(dialog, &HelpDialog::accepted, subWindow,
+                   &QMdiSubWindow::close);
+  QObject::connect(subWindow, &QMdiSubWindow::destroyed, this, [dialog] {
+    delete dialog;
+  });
+  dialog->show();
 }
