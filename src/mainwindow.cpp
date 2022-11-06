@@ -11,6 +11,7 @@
 
 #include "constants.hpp"
 #include "crashreportdialog.hpp"
+#include "helpdialog.hpp"
 #include "maindialog.hpp"
 
 namespace korrelator {
@@ -90,6 +91,7 @@ MainWindow::~MainWindow()
   delete m_reloadTradeAction;
   delete m_aboutAction;
   delete m_newDialogAction;
+  delete m_howToAction;
 
   m_workSpace.reset();
   delete ui;
@@ -125,12 +127,18 @@ void MainWindow::createActions() {
                    &MainWindow::onReloadTradeConfigTriggered);
 
   m_aboutAction = new QAction("&About");
-  m_aboutAction->setShortcut(QKeySequence("F1"));
+  m_aboutAction->setShortcut(QKeySequence("F2"));
   m_aboutAction->setToolTip("Show the software information used for"
                                   " developing this software");
   m_aboutAction->setIcon(QIcon(":/image/images/about.png"));
   QObject::connect(m_aboutAction, &QAction::triggered, qApp,
                    &QApplication::aboutQt);
+
+  m_howToAction = new QAction("&Using Correlator");
+  m_howToAction->setShortcut(QKeySequence("F1"));
+  m_howToAction->setToolTip("Explain in detail how to use this correlator program");
+  m_howToAction->setIcon(QIcon(":/image/images/howTo.png"));
+  QObject::connect(m_howToAction, &QAction::triggered, this, &MainWindow::ShowHowToWindow);
 }
 
 MainDialog* MainWindow::getActiveDialog() {
@@ -186,6 +194,7 @@ void MainWindow::createMenus() {
   editMenu->addAction(m_preferenceAction);
 
   auto helpMenu = menuBar()->addMenu("&Help");
+  helpMenu->addAction(m_howToAction);
   helpMenu->addAction(m_aboutAction);
 }
 
@@ -231,6 +240,23 @@ void MainWindow::ShowCrashUI(QString const &filename)
   QObject::connect(dialog, &CrashReportDialog::finished, subWindow,
                    &QMdiSubWindow::close);
   QObject::connect(dialog, &CrashReportDialog::accepted, subWindow,
+                   &QMdiSubWindow::close);
+  QObject::connect(subWindow, &QMdiSubWindow::destroyed, this, [dialog] {
+    delete dialog;
+  });
+  dialog->show();
+}
+
+void MainWindow::ShowHowToWindow()
+{
+  auto dialog = new HelpDialog(this);
+  auto subWindow = m_workSpace->addSubWindow(dialog);
+  subWindow->setAttribute(Qt::WA_DeleteOnClose);
+  subWindow->setWindowTitle(dialog->windowTitle());
+
+  QObject::connect(dialog, &HelpDialog::finished, subWindow,
+                   &QMdiSubWindow::close);
+  QObject::connect(dialog, &HelpDialog::accepted, subWindow,
                    &QMdiSubWindow::close);
   QObject::connect(subWindow, &QMdiSubWindow::destroyed, this, [dialog] {
     delete dialog;

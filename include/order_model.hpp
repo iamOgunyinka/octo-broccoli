@@ -16,6 +16,7 @@ struct model_data_t {
   QString openTime;
   QString side;
   QString remark;
+  QString tradeOrigin;
   double signalPrice = 0.0;
   double openPrice = 0.0;
   double exchangePrice = 0.0;
@@ -40,6 +41,10 @@ public:
                   const QModelIndex &parent = QModelIndex()) override;
   void AddData(model_data_t const &);
   void refreshModel ();
+  auto totalRows() const { return m_modelData.size(); }
+  auto allItems() const {
+    return std::vector<model_data_t>(m_modelData.cbegin(), m_modelData.cend());
+  }
   model_data_t* modelDataFor(QString const &, QString const &);
   model_data_t* front() {
     if (m_modelData.empty())

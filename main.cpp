@@ -149,9 +149,11 @@ static int monitorCorrelatorProgram(int &argc, char **argv) {
 
 
 int main(int argc, char **argv) {
+#ifndef _DEBUG
   if (qgetenv(kRunLogic) != kRunLogicValue)
     return monitorCorrelatorProgram(argc, argv);
 
   qunsetenv(kRunLogic);
+#endif
   return runCorrelatorProgram(argc, argv);
 }

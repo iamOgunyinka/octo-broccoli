@@ -55,6 +55,13 @@ struct watchable_data_t {
   korrelator::token_list_t futures;
 };
 
+enum class order_origin_e {
+  from_price_normalization,
+  from_price_average,
+  from_both,
+  from_none
+};
+
 class binance_symbols;
 class kucoin_symbols;
 class ftx_symbols;
@@ -99,6 +106,10 @@ signals:
                         korrelator::exchange_name_e const,
                         korrelator::trade_type_e const);
 
+  void newPriceDeltaOrderDetected(
+      korrelator::cross_over_data_t, korrelator::model_data_t,
+      korrelator::exchange_name_e const, korrelator::trade_type_e const);
+
 public:
   MainDialog(bool& warnOnExit, std::filesystem::path const configDirectory,
              QWidget *parent = nullptr);
@@ -128,7 +139,7 @@ private:
   void takeBackToFactoryReset();
   void onOKButtonClicked();
   void onStartVerificationSuccessful();
-  void stopGraphPlotting();
+  void stopGraphPlotting(bool const requestConfirmation);
   void saveAppConfigToFile();
   void readAppConfigFromFile();
   void updateKuCoinTradeConfiguration();
@@ -155,11 +166,13 @@ private:
   double getMaxPlotsInVisibleRegion() const;
   void updateGraphData(double const key, bool const);
   void setupOrderTableModel();
+  void calculateAveragePriceDifference();
   void updateTradeConfigurationPrecisions();
   void onNewOrderDetected(korrelator::cross_over_data_t,
                           korrelator::model_data_t,
                           exchange_name_e const,
-                          trade_type_e const);
+                          trade_type_e const,
+                          korrelator::order_origin_e const origin);
   void calculatePriceNormalization();
   Qt::Alignment getLegendAlignment() const;
   list_iterator find(korrelator::token_list_t &container, QString const &,
@@ -175,20 +188,30 @@ private:
 
   void sendExchangeRequest(korrelator::model_data_t &,
                            exchange_name_e const, trade_type_e const tradeType,
-                           korrelator::trade_action_e const, double const);
+                           korrelator::trade_action_e const, double const,
+                           korrelator::order_origin_e const origin);
   korrelator::trade_config_data_t* getTradeInfo(
       exchange_name_e const exchange, trade_type_e const tradeType,
-      korrelator::trade_action_e const action, QString const &symbol);
+      korrelator::trade_action_e const action,
+      korrelator::order_origin_e const tradeOrigin,
+      QString const &symbol);
   bool onSingleTradeInfoGenerated(korrelator::trade_config_data_t*,
                                   korrelator::api_data_t const &apiInfo,
                                   double const openPrice);
-  void onDoubleTradeInfoGenerated(korrelator::trade_config_data_t *tradeConfigPtr,
+  void onDoubleTradeInfoGenerated(
+      korrelator::order_origin_e const tradeOrigin,
+      korrelator::trade_config_data_t *tradeConfigPtr,
                                   korrelator::api_data_t const &apiInfo,
                                   double const openPrice);
-  static void updatePlottingKey(korrelator::waitable_container_t<double>&,
-                                QCustomPlot* customPlot,
-                                QCustomPlot* priceDeltaPlot,
-                                double& maxVisiblePlot);
+  void makePriceAverageOrder(korrelator::trade_action_e const tradeAction,
+                             korrelator::trade_type_e const tradeType);
+  void onExportButtonClicked();
+  void OnTradeAverageRadioToggled(bool const);
+  void OnTradeBothAverageNormalToggled(bool const);
+  void OnTradeNormalizedPriceToggled(bool const);
+  void ConnectAllTradeRadioSignals(bool const);
+  void updatePlottingKey();
+
   static void tradeExchangeTokens(
       std::function<void()> refreshModel,
       korrelator::waitable_container_t<korrelator::plug_data_t>&,
@@ -196,8 +219,27 @@ private:
       int& expectedTradeCount);
 
 private:
+  using trade_config_list_t = std::vector<korrelator::trade_config_data_t>;
+  struct average_order_data_t {
+    trade_config_list_t dataList;
+    korrelator::trade_action_e futuresLastAction;
+    korrelator::trade_action_e spotsLastAction;
+  };
+
+  struct normalized_order_data_t {
+    trade_config_list_t dataList;
+    korrelator::trade_action_e lastTradeAction;
+  };
+
+  struct plot_graph_data_t {
+    double lastKey;
+    std::mutex mutex;
+    QTimer timer;
+  };
+
   Ui::MainDialog *ui;
   QListWidget* m_currentListWidget;
+  QTimer *m_averagePriceDifferenceTimer = nullptr;
   QNetworkAccessManager m_networkManager;
   std::unique_ptr<korrelator::websocket_manager> m_websocket;
   std::unique_ptr<korrelator::order_model> m_model = nullptr;
@@ -206,25 +248,30 @@ private:
   korrelator::token_list_t m_tokens;
   korrelator::token_list_t m_refs;
   korrelator::token_list_t m_priceDeltas;
-  std::vector<korrelator::trade_config_data_t> m_tradeConfigDataList;
   korrelator::graph_updater_t m_graphUpdater;
   korrelator::price_updater_t m_priceUpdater;
   korrelator::symbol_fetcher_t m_symbolUpdater;
   std::unique_ptr<QCPLayoutGrid> m_legendLayout;
   korrelator::waitable_container_t<korrelator::plug_data_t> m_tokenPlugs;
-  korrelator::waitable_container_t<double> m_graphKeys;
+  plot_graph_data_t m_graphPlotter;
   QTimer m_timerPlot;
   QElapsedTimer m_elapsedTime;
-  korrelator::trade_action_e m_lastTradeAction;
   korrelator::rot_t m_restartTickValues;
   std::filesystem::path const m_configDirectory;
-
+  std::optional<normalized_order_data_t> m_normalizationOrderData = std::nullopt;
+  std::optional<average_order_data_t> m_priceAverageOrderData = std::nullopt;
   double m_lastGraphPoint = 0.0;
   double m_threshold = 0.0;
   double m_maxVisiblePlot = 100.0;
+  double m_lastKeyUsed = 0.0;
+  double m_lastPriceAverage = 0.0;
+  double m_maxAverageThreshold = 0.0;
+  double m_averageUp = 0.0;
+  double m_averageDown = 0.0;
 
   int m_maxOrderRetries = 10;
   int m_expectedTradeCount = 1; // max 2
+  korrelator::order_origin_e m_orderOrigin = korrelator::order_origin_e::from_none;
 
   bool m_doingAutoLDClosure = false; // automatic "line distance" (LD) closure
   bool m_doingManualLDClosure = false; // manualInterval LD closure
@@ -232,6 +279,8 @@ private:
   bool m_firstRun = true;
   bool m_findingUmbral = false; // umbral is spanish word for threshold
   bool m_hasReferences = false;
+  bool m_tradeOpened = false;
+  bool m_calculatingNormalPrice = true;
   bool& m_warnOnExit;
 };
 

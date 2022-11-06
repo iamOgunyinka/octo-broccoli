@@ -31,6 +31,7 @@ private:
   void onPreferenceTriggered();
   void onReloadTradeConfigTriggered();
   void ShowCrashUI(QString const &);
+  void ShowHowToWindow();
   MainDialog* getActiveDialog();
 
   Ui::MainWindow *ui;
@@ -39,6 +40,7 @@ private:
   QAction* m_reloadTradeAction = nullptr;
   QAction* m_aboutAction = nullptr;
   QAction* m_newDialogAction = nullptr;
+  QAction* m_howToAction = nullptr;
 
   std::unique_ptr<QMdiArea> m_workSpace;
   std::filesystem::path m_rootConfigDirectory;
