@@ -25,16 +25,16 @@
 <p>There are a number of widgets in the Correlator program and it may be difficult to know what each one does at first glance. This documentation is meant to explain how the program works, so let's start first with explanation on the widgets.</p>
 <h3 id="the-launch">The launch</h3>
 <p>At the launch of the correlator program, you are presented with the main window. This window is intentionally kept simple, it has a menu bar and a toolbar. On these bars, you are presented with the options to open <code>New trade</code>, <code>Reload trade</code>, <code>API Key</code>, <code>Using correlator</code> and <code>About</code>.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200158153-04b15650-72a0-4113-9ad1-ff838fc84deb.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/first.png" alt="image" /></p>
 <h3 id="about-on-the-toolbar">About (on the toolbar)</h3>
 <p>This window shows information about the software used in the development of the program - Qt. It goes on to explain what Qt is, what platforms it works on, the licenses etc.</p>
 <h2 id="using-correlator-on-the-toolbar">Using correlator (on the toolbar)</h2>
 <p>This is the window that is opened right now. It is the documentation that describes how correlator works.</p>
 <h3 id="new-trade">New trade</h3>
 <p>This is the most important part of the program. Pressing the <code>New trade</code> button on the main window's toolbar opens a child window that is located inside of the main window itself(See image #2).</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200158204-83cb9c66-4c5f-4ef2-b191-8c4b34907bb2.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/second.png" alt="image" /></p>
 <p>To use this window, there are three tabs we need to get familiar with, namely <code>Settings</code>, <code>Charts</code> and the <code>Order table</code>.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200158132-2ee7fd09-a77c-473b-9013-caeb7c0f733d.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/third.png" alt="image" /></p>
 <h3 id="the-settings-tab">The settings tab</h3>
 <p>This is where majority of the widgets are. Click on the <code>Settings</code> tab and let's walk through it together.</p>
 <ul>
@@ -50,7 +50,7 @@
 <li>The <code>Futures</code> box hold the list of futures token that can be traded on an exchange too.</li>
 </ul></li>
 </ul>
-<p><img src="https://user-images.githubusercontent.com/4146085/200158328-7511c202-9f80-4019-9171-9c117d8151ff.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/fourth.png" alt="image" /></p>
 <p>We mentioned above that, to use a correlator, we would need to plot data on the graph, of price changes of crypto tokens. That means, we would have to manually select spot or futures token from the list we discussed above and the tokens could be from any of the three exchanges implemented -- Binance, FTX or Kucoin.</p>
 <p>To select a token:</p>
 <ul>
@@ -67,7 +67,7 @@
 <li>The current selected token in the spot or futures box would be listed on the second list widget titled <code>Correlator plot tokens</code></li>
 <li>To remove a selected token from the list, click on the name of the token to be removed and click on the <code>&lt;&lt;</code> button.</li>
 </ul>
-<p><img src="https://user-images.githubusercontent.com/4146085/200160087-7d1e3e0f-7203-4778-ac69-fb6c65adb5da.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/fifth.png" alt="image" /></p>
 <h3 id="tradable-and-reference-tokens">Tradable and reference tokens</h3>
 <p>The maximum number of tokens that can be traded in the correlator is <strong>one</strong>. However, we could use the prices of other tokens from one or more exchanges as references. Prices of reference tokens are used to determine when to buy or sell the specified token. When we select a token to be added to the list, we can specify which ONE to be traded and the others whose correlated/normalized prices should be used as references. All reference tokens are combined (by finding the <code>mean</code> of their normalized prices) and they are drawn as one data line on the graph.</p>
 <ul>
@@ -82,7 +82,7 @@
 <li>Reference tokens end with asterisks <code>*</code></li>
 <li>Tradable token do not.</li>
 </ul>
-<p><img src="https://user-images.githubusercontent.com/4146085/200160998-054011b8-026d-4d1e-a27c-dc1d44f05487.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/sixth.png" alt="image" /></p>
 <p>NB: Tokens that can be traded must not exceed ONE. Reference tokens can be one or more, no limit is set on reference tokens.</p>
 <h4 id="the-great-reset">The great reset</h4>
 <p>In the section titled <code>A solution</code>, we usually find the minimum and maximum price the first time we get the price of a specific token. That's ordinarily the default, the first time. However, we could tell the program to find the minimum and maximum price after a certain number of graph ticks. There are four kinds of reset that we can specify:</p>
@@ -101,10 +101,10 @@
 <li>the input line captioned <code>Reduce lines to this %</code> is where the user specifies the distance it wants it to have.</li>
 </ul>
 <p>For special reset, say, we specify <code>1</code> in <code>Max % difference allowed</code> (which is 1%), and <code>0.1</code> in <code>Reduce lines to this %</code> -- when the gap between the ref and normal line reaches 1%, the gap is reduced to 0.1%. Then the program continues. The gap is closed ONLY if the gap &gt;= the value specified in <code>Max % difference allowed</code> input line.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200160431-f2133204-3882-4baa-95ef-d510ef1c02ce.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/seventh.png" alt="image" /></p>
 <h3 id="defining-the-graph-to-your-taste">Defining the graph to your taste.</h3>
 <p>A number of things can be tuned on the graph scene to make it presentable. For example, the legends -- which are the labels that shows the color used and names of the lines representing the normal and reference lines. The <code>graph thickness</code> can be changed from 1 to 5 to change the thickness of each lines on the graph scene. The <code>show data for</code> box is used to change the amount of data shown on the graph. The default is <code>100 seconds</code>, which means the graph scene only show data for the last 100 seconds. The <code>Periodic tick</code> box is used to specify how often the graph data is updated. Default is 100 ms and it almost always suffice to leave it as-is.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200161999-1fe7357a-f3dd-482b-bc45-4add737cdb8d.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/eigth.png" alt="image" /></p>
 <h3 id="the-threshold-and-trade-initialization">The threshold and trade initialization</h3>
 <p>In the normalization "world", trades are initiated when the ref graph line and the tradable/normal graph line makes a crossover AND then a certain threshold is opened. This threshold is indicated in the <code>Umbral</code> input line. Say, for example, if the ref and the normal line makes a cross-over, and then after a while the gap between the two lines reaches the amount specified in the <code>Umbral</code> line, a trade is initiated.</p>
 <p>What SIDE is opened is dependent on what side of the line is above and what side is below.</p>
@@ -117,15 +117,15 @@
 </ul>
 <p>For every cross-over that happens, as long as the conditions above is satisfied, a trade will always be initiated. It could be hundreds or thousands of <code>BUY</code> or <code>SELL</code> orders over and over again. That means you could be buying and buying without one single SELL or you could be selling and selling without a single BUY. Thus, to limit the buying and selling to only happen interchangeably (i.e you must sell after a buy and can only buy after a SELL), one must check the <code>One operation only</code> box. That limits the orders to BUY after SELL and SELL after BUY. This solves the problem of BUY BUY BUY BUY BUY or SELL SELL SELL SELL.</p>
 <p>If an order fails(rarely so), perhaps because of poor network connection, the program tries over and over to initiate the same order again. The user can indicate in the <code>Max retries</code> box the maximum number of time the program is allowed to retry failed orders -- the default is 10.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200162181-8014b45d-21fc-4cd5-b2e5-56aa2a513af6.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/ninth.png" alt="image" /></p>
 <h3 id="test-drive-or-not">Test drive or not</h3>
 <p>Unchecking the box labelled "Live trade" allows the user test the program without actually doing any trade on any of the exchanges. Checking it initiates live trade directly on any of the exchanges the tradable/normal token selected is from.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200162769-d84914c2-c46e-4fbb-99c6-4127d5cc7618.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/tenth.png" alt="image" /></p>
 <h2 id="price-averaging">Price averaging</h2>
 <p>Before now, we have talked exclusively on price normalization and how we initiate order when a cross-over happens on the data plotted on the graph. We have another way of initiating orders and this is based on price averaging. To do price averaging, the user picks at most <strong>two</strong> tokens from the list of exchange tokens -- one spot and one futures token. The price averaging works by:</p>
 <p><code>dataToPlotOnGraph = (priceOfA + priceOfB) / priceOfB;</code></p>
 <p>To select tokens to be used for price averaging, the specific widget box (shown below) is used, and the user must select the <code>Activate the price delta widget below</code> checkbox(also shown below). Only then would the program know that the selected tokens is meant for price averaging.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200163623-c7d3c613-bb68-4a3e-858f-e2c064f1220e.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/eleventh.png" alt="image" /></p>
 <p>Now that we have two means of generating orders, normalization (which we discussed extensively above) and price averaging (which is being discussed now), we can specify to the program which of it we would like to use:</p>
 <ul>
 <li>Allow normal (normalization orders) + average (price averaging orders) trade</li>
@@ -137,7 +137,7 @@
 <p>When the box <code>Use last saved average at startup</code> is checked, the program saves the average used when the program was last run and then one subsequent runs, that average is the first average used.</p>
 <h2 id="the-charts-tab">The <code>Charts</code> tab</h2>
 <p>This is the tab that holds the normalization (top graph) and price averaging (bottom) graphs.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200163396-1e91c3c3-53c5-4f87-838e-ee98533952cf.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/twelveth.png" alt="image" /></p>
 <h2 id="the-order-table-tab">The <code>Order table</code> tab</h2>
 <p>This tab shows the list of all generated orders and the orders generated can be exported as a CSV file.</p>
-<p><img src="https://user-images.githubusercontent.com/4146085/200163377-be831139-9754-468c-b8a7-e41d9205f11a.png" alt="image" /></p>
+<p><img src="qrc:/image/images/helpDir/thirteenth.png" alt="image" /></p>
