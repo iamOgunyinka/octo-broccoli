@@ -27,7 +27,6 @@ namespace net = boost::asio;
 
 class binance_ws;
 class kucoin_ws;
-class ftx_websocket;
 
 enum class trade_type_e;
 enum class exchange_name_e;
@@ -41,8 +40,7 @@ class websocket_manager {
     QString tokenName;
   };
 
-  using socket_variant = std::variant<binance_ws*, kucoin_ws*,
-                                      ftx_websocket*>;
+  using socket_variant = std::variant<binance_ws*, kucoin_ws*>;
 public:
   websocket_manager();
   ~websocket_manager();

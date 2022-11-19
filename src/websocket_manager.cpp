@@ -2,7 +2,6 @@
 
 #include "binance_websocket.hpp"
 #include "kucoin_websocket.hpp"
-#include "ftx_websocket.hpp"
 
 #include <thread>
 
@@ -66,11 +65,6 @@ void websocket_manager::addSubscription(QString const &tokenName,
 #endif
                               result, tradeType);
     sock->addSubscription(tokenName.toUpper());
-    m_sockets.push_back(std::move(sock));
-  } else if (exchange == exchange_name_e::ftx) {
-    auto sock = new ftx_websocket(
-          *m_ioContext, m_sslContext, result, tradeType);
-    sock->addSubscription(tokenName.toLower());
     m_sockets.push_back(std::move(sock));
   }
 }
