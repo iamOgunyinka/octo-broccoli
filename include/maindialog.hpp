@@ -64,12 +64,10 @@ enum class order_origin_e {
 
 class binance_symbols;
 class kucoin_symbols;
-class ftx_symbols;
 
 struct symbol_fetcher_t {
   std::unique_ptr<binance_symbols> binance;
   std::unique_ptr<kucoin_symbols> kucoin;
-  std::unique_ptr<ftx_symbols> ftx;
   symbol_fetcher_t();
   ~symbol_fetcher_t();
 };

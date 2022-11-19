@@ -15,7 +15,6 @@
 #include "constants.hpp"
 #include "container.hpp"
 #include "double_trader.hpp"
-#include "ftx_symbols.hpp"
 #include "kucoin_symbols.hpp"
 #include "order_model.hpp"
 #include "qcustomplot.h"
@@ -35,8 +34,6 @@ QString exchangeNameToString(exchange_name_e const ex) {
     return "Binance";
   else if (ex == exchange_name_e::kucoin)
     return "KuCoin";
-  else if (ex == exchange_name_e::ftx)
-    return "FTX";
   return QString();
 }
 
@@ -86,8 +83,6 @@ exchange_name_e stringToExchangeName(QString const &name) {
     return exchange_name_e::binance;
   else if (name_.compare("kucoin", Qt::CaseInsensitive) == 0)
     return exchange_name_e::kucoin;
-  else if (name_.compare("ftx", Qt::CaseInsensitive) == 0)
-    return exchange_name_e::ftx;
   return exchange_name_e::none;
 }
 
@@ -140,7 +135,7 @@ void token_t::reset() {
 }
 
 symbol_fetcher_t::symbol_fetcher_t()
-    : binance{nullptr}, kucoin{nullptr}, ftx{nullptr} {}
+    : binance{nullptr}, kucoin{nullptr} {}
 
 symbol_fetcher_t::~symbol_fetcher_t() {
   binance.reset();
@@ -149,7 +144,6 @@ symbol_fetcher_t::~symbol_fetcher_t() {
 
 bool hasValidExchange(exchange_name_e const exchange) {
   return exchange == exchange_name_e::binance ||
-         exchange_name_e::ftx == exchange ||
          exchange_name_e::kucoin == exchange;
 }
 
@@ -168,7 +162,6 @@ MainDialog::MainDialog(bool &warnOnExit,
       new korrelator::binance_symbols(m_networkManager));
   m_symbolUpdater.kucoin.reset(
       new korrelator::kucoin_symbols(m_networkManager));
-  m_symbolUpdater.ftx.reset(new korrelator::ftx_symbols(m_networkManager));
 
   setWindowIcon(qApp->style()->standardPixmap(QStyle::SP_DesktopIcon));
   setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint |
@@ -198,11 +191,8 @@ MainDialog::MainDialog(bool &warnOnExit,
   }}.detach();
 
   QTimer::singleShot(std::chrono::milliseconds(500), this, [this] {
-    for (auto const &exchange :
-         {exchange_name_e::ftx, exchange_name_e::kucoin}) {
-      getSpotsTokens(exchange);
-      getFuturesTokens(exchange);
-    }
+    getSpotsTokens(exchange_name_e::kucoin);
+    getFuturesTokens(exchange_name_e::kucoin);
   });
   ui->tabWidget->setCurrentWidget(ui->tabSettings);
   ui->activatePriceDiffCheckbox->setChecked(true);
@@ -290,7 +280,7 @@ void MainDialog::takeBackToFactoryReset() {
   readTradesConfigFromFile();
 
   std::vector<exchange_name_e> const exchanges{
-      exchange_name_e::binance, exchange_name_e::kucoin, exchange_name_e::ftx};
+      exchange_name_e::binance, exchange_name_e::kucoin};
   for (auto const &exchange : exchanges) {
     m_watchables[(int)exchange].futures.clear();
     m_watchables[(int)exchange].spots.clear();
@@ -416,7 +406,7 @@ void MainDialog::connectAllUISignals() {
                      else
                        m_expectedTradeCount = 1;
                    });
-  ui->exchangeCombo->addItems({"Binance", "FTX", "KuCoin"});
+  ui->exchangeCombo->addItems({"Binance", "KuCoin"});
 
   QObject::connect(ui->applySpecialButton, &QPushButton::clicked, this,
                    &MainDialog::onApplyButtonClicked);
@@ -868,8 +858,6 @@ void MainDialog::getSpotsTokens(korrelator::exchange_name_e const exchange,
       return m_symbolUpdater.binance->getSpotsSymbols(cb, errorCallback);
     } else if (exchange_name_e::kucoin == exchange) {
       return m_symbolUpdater.kucoin->getSpotsSymbols(cb, errorCallback);
-    } else if (exchange == exchange_name_e::ftx) {
-      return m_symbolUpdater.ftx->getSpotsSymbols(cb, errorCallback);
     }
   }
 
@@ -901,8 +889,6 @@ void MainDialog::getSpotsTokens(korrelator::exchange_name_e const exchange,
     return m_symbolUpdater.binance->getSpotsSymbols(callback, errorCallback);
   } else if (exchange_name_e::kucoin == exchange) {
     return m_symbolUpdater.kucoin->getSpotsSymbols(callback, errorCallback);
-  } else if (exchange == exchange_name_e::ftx) {
-    return m_symbolUpdater.ftx->getSpotsSymbols(callback, errorCallback);
   }
 }
 
@@ -917,8 +903,6 @@ void MainDialog::getFuturesTokens(korrelator::exchange_name_e const exchange,
       return m_symbolUpdater.binance->getFuturesSymbols(cb, errorCallback);
     } else if (exchange_name_e::kucoin == exchange) {
       return m_symbolUpdater.kucoin->getFuturesSymbols(cb, errorCallback);
-    } else if (exchange == exchange_name_e::ftx) {
-      return m_symbolUpdater.ftx->getFuturesSymbols(cb, errorCallback);
     }
   }
 
@@ -951,8 +935,6 @@ void MainDialog::getFuturesTokens(korrelator::exchange_name_e const exchange,
     return m_symbolUpdater.binance->getFuturesSymbols(callback, errorCallback);
   } else if (exchange_name_e::kucoin == exchange) {
     return m_symbolUpdater.kucoin->getFuturesSymbols(callback, errorCallback);
-  } else if (exchange == exchange_name_e::ftx) {
-    return m_symbolUpdater.ftx->getFuturesSymbols(callback, errorCallback);
   }
 }
 
@@ -989,14 +971,6 @@ void MainDialog::getExchangeInfo(exchange_name_e const exchange,
     } else {
       return m_symbolUpdater.kucoin->getFuturesExchangeInfo(&container.futures,
                                                             errorCallback);
-    }
-  } else if (exchange == exchange_name_e::ftx) {
-    if (tradeType == trade_type_e::spot) {
-      return m_symbolUpdater.ftx->getSpotsExchangeInfo(&container.spots,
-                                                       errorCallback);
-    } else {
-      return m_symbolUpdater.ftx->getFuturesExchangeInfo(&container.spots,
-                                                         errorCallback);
     }
   }
 }
@@ -1237,12 +1211,12 @@ void MainDialog::readAppConfigFromFile() {
     for (int i = 0; i < tokenJsonList.size(); ++i) {
       QJsonObject const obj = tokenJsonList[i].toObject();
       auto const tokenName = obj["symbol"].toString().toUpper();
-      auto const tradeType = obj["market"].toString().toLower() == "spot"
-                                 ? trade_type_e::spot
-                                 : trade_type_e::futures;
+      auto const tradeType =
+          korrelator::stringToTradeType(obj["market"].toString());
       auto const isRef = obj["ref"].toBool();
       auto const exchange =
           korrelator::stringToExchangeName(obj["exchange"].toString());
+
       if (exchange == korrelator::exchange_name_e::none)
         continue;
       ui->refCheckBox->setChecked(isRef);
@@ -1253,18 +1227,17 @@ void MainDialog::readAppConfigFromFile() {
 
   {
     auto const priceWidgetChecked = ui->activatePriceDiffCheckbox->isChecked();
+    ui->activatePriceDiffCheckbox->setChecked(true);
     for (int i = 0; i < priceDeltaJsonList.size(); ++i) {
-      QJsonObject const obj = tokenJsonList[i].toObject();
+      QJsonObject const obj = priceDeltaJsonList[i].toObject();
       auto const tokenName = obj["symbol"].toString().toUpper();
-      auto const tradeType = obj["market"].toString().toLower() == "spot"
-                                 ? trade_type_e::spot
-                                 : trade_type_e::futures;
+      auto const tradeType = korrelator::stringToTradeType(
+            obj["market"].toString().toLower());
       auto const exchange =
           korrelator::stringToExchangeName(obj["exchange"].toString());
       if (exchange == korrelator::exchange_name_e::none)
         continue;
 
-      ui->activatePriceDiffCheckbox->setChecked(true);
       addNewItemToTokenMap(tokenName, tradeType, exchange);
     }
     ui->activatePriceDiffCheckbox->setChecked(priceWidgetChecked);

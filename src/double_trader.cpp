@@ -3,7 +3,6 @@
 #include <QDebug>
 
 #include "binance_https_request.hpp"
-#include "ftx_https_request.hpp"
 #include "kucoin_https_request.hpp"
 #include "order_model.hpp"
 
@@ -72,16 +71,6 @@ void double_trader_t::initiateTrading(plug_data_t const &tradeMetadata,
     }
     connector.binanceTrader->setPrice(tradeMetadata.tokenPrice);
     connector.binanceTrader->startConnect();
-  } else if (tradeMetadata.exchange == exchange_name_e::ftx) {
-    connector.ftxTrader = new ftx_trader(
-        m_ioContext, m_sslContext, tradeType,
-        tradeMetadata.apiInfo, tradeMetadata.tradeConfig);
-    if (!m_futuresLeverageIsSet && trade_type_e::futures == tradeType) {
-        m_futuresLeverageIsSet = true;
-        connector.ftxTrader->setAccountLeverage();
-    }
-    connector.ftxTrader->setPrice(tradeMetadata.tokenPrice);
-    connector.ftxTrader->startConnect();
   }
 }
 
@@ -112,11 +101,6 @@ void double_trader_t::cleanupTradingData(
     price = binanceRequest.averagePrice();
     errorString = binanceRequest.errorString();
     delete connector.binanceTrader;
-  } else if (tradeMetadata.exchange == exchange_name_e::ftx) {
-    price = connector.ftxTrader->getAveragePrice();
-    errorString = connector.ftxTrader->errorString();
-    delete connector.ftxTrader;
-    connector.ftxTrader = nullptr;
   }
 
   auto modelData = m_model->modelDataFor(

@@ -1,7 +1,6 @@
 #include "single_trader.hpp"
 
 #include "binance_https_request.hpp"
-#include "ftx_https_request.hpp"
 #include "kucoin_https_request.hpp"
 #include "order_model.hpp"
 
@@ -66,16 +65,6 @@ namespace korrelator {
       }
       connector.binanceTrader->setPrice(tradeMetadata.tokenPrice);
       connector.binanceTrader->startConnect();
-    } else if (tradeMetadata.exchange == exchange_name_e::ftx) {
-      connector.ftxTrader = new ftx_trader(
-          m_ioContext, m_sslContext, tradeType,
-          tradeMetadata.apiInfo, tradeMetadata.tradeConfig);
-      if (!m_futuresLeverageIsSet && trade_type_e::futures == tradeType) {
-          m_futuresLeverageIsSet = true;
-          connector.ftxTrader->setAccountLeverage();
-      }
-      connector.ftxTrader->setPrice(tradeMetadata.tokenPrice);
-      connector.ftxTrader->startConnect();
     }
 
     m_ioContext.run();
@@ -105,11 +94,6 @@ namespace korrelator {
       price = binanceRequest.averagePrice();
       errorString = binanceRequest.errorString();
       delete connector.binanceTrader;
-    } else if (tradeMetadata.exchange == exchange_name_e::ftx) {
-      price = connector.ftxTrader->getAveragePrice();
-      errorString = connector.ftxTrader->errorString();
-      delete connector.ftxTrader;
-      connector.ftxTrader = nullptr;
     }
 
     if (modelData)

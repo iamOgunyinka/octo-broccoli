@@ -63,11 +63,6 @@ SOURCES += main.cpp \
   src/mainwindow.cpp \
   src/binance_symbols.cpp \
   src/crashreportdialog.cpp \
-  src/ftx_futures_plug.cpp \
-  src/ftx_https_request.cpp \
-  src/ftx_spots_plug.cpp \
-  src/ftx_symbols.cpp \
-  src/ftx_websocket.cpp \
   src/binance_futures_plug.cpp \
   src/binance_spots_plug.cpp \
   src/binance_https_request.cpp \
@@ -92,10 +87,6 @@ HEADERS += include/binance_symbols.hpp \
   include/helpdialog.hpp \
   include/crashreportdialog.hpp \
   include/double_trader.hpp \
-  include/ftx_futures_plug.hpp \
-  include/ftx_https_request.hpp \
-  include/ftx_spots_plug.hpp \
-  include/ftx_symbols.hpp \
   include/binance_futures_plug.hpp \
   include/binance_https_request.hpp \
   include/binance_spots_plug.hpp \
@@ -103,7 +94,6 @@ HEADERS += include/binance_symbols.hpp \
   include/constants.hpp \
   include/container.hpp \
   include/crypto.hpp \
-  include/ftx_websocket.hpp \
   include/kucoin_futures_plug.hpp \
   include/kucoin_https_request.hpp \
   include/kucoin_spots_plug.hpp \
