@@ -132,8 +132,8 @@ private:
   void newItemAdded(QString const &token, trade_type_e const,
                     exchange_name_e const);
   void tokenRemoved(QString const &text);
-  void onNormalizedGraphTimerTick(bool const minMaxNeedsUpdate, double const key);
-  void onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate, double const key);
+  void onNormalizedGraphTimerTick(bool const minMaxNeedsUpdate);
+  void onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate);
   void takeBackToFactoryReset();
   void onOKButtonClicked();
   void onStartVerificationSuccessful();
@@ -207,6 +207,7 @@ private:
   void OnTradeAverageRadioToggled(bool const);
   void OnTradeBothAverageNormalToggled(bool const);
   void OnTradeNormalizedPriceToggled(bool const);
+  void OnMaxVisibleTimeTimedOut();
   void ConnectAllTradeRadioSignals(bool const);
   void updatePlottingKey();
 
@@ -230,7 +231,6 @@ private:
   };
 
   struct plot_graph_data_t {
-    double lastKey;
     std::mutex mutex;
     QTimer timer;
   };
@@ -253,6 +253,7 @@ private:
   korrelator::waitable_container_t<korrelator::plug_data_t> m_tokenPlugs;
   plot_graph_data_t m_graphPlotter;
   QTimer m_timerPlot;
+  QTimer m_maxVisibleTimeTimer;
   QElapsedTimer m_elapsedTime;
   korrelator::rot_t m_restartTickValues;
   std::filesystem::path const m_configDirectory;

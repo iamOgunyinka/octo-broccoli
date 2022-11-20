@@ -22,7 +22,7 @@ double kuCoinGetCoinPrice(char const *str, size_t const size,
 
   auto const jsonObject = d.GetObject();
   auto iter = jsonObject.FindMember("data");
-  if (iter == jsonObject.end())
+  if (iter == jsonObject.end() || !iter->value.IsObject())
     return -1.0;
   auto const dataObject = iter->value.GetObject();
   if (isSpot) {

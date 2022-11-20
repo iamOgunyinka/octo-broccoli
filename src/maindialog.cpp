@@ -443,7 +443,7 @@ void MainDialog::connectAllUISignals() {
   QObject::connect(
       ui->selectionCombo,
       static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-      this, [this](int const) {
+      this, [this](int const index) {
         m_maxVisiblePlot = getMaxPlotsInVisibleRegion();
         if (!m_programIsRunning) {
           double const key = m_elapsedTime.elapsed() / 1'000.0;
@@ -453,6 +453,17 @@ void MainDialog::connectAllUISignals() {
                                               Qt::AlignRight);
           ui->customPlot->replot();
           ui->priceDeltaPlot->replot();
+        }
+
+        if (index > 2) {
+          m_maxVisibleTimeTimer.disconnect(this);
+          if (m_maxVisibleTimeTimer.isActive())
+            m_maxVisibleTimeTimer.stop();
+
+          m_maxVisibleTimeTimer.setSingleShot(true);
+          QObject::connect(&m_maxVisibleTimeTimer, &QTimer::timeout, this,
+                           &MainDialog::OnMaxVisibleTimeTimedOut);
+          m_maxVisibleTimeTimer.start(std::chrono::milliseconds(60'000));
         }
       });
 
@@ -545,6 +556,12 @@ void MainDialog::OnTradeAverageRadioToggled(bool const isSelected) {
     m_priceAverageOrderData.emplace();
     readTradesConfigFromFile();
   }
+}
+
+void MainDialog::OnMaxVisibleTimeTimedOut()
+{
+  if (ui->selectionCombo->count() > 0)
+    ui->selectionCombo->setCurrentIndex(0);
 }
 
 void MainDialog::OnTradeNormalizedPriceToggled(bool const isSelected) {
@@ -1472,10 +1489,12 @@ void MainDialog::resetGraphComponents() {
   ui->customPlot->clearGraphs();
   ui->customPlot->clearPlottables();
   ui->customPlot->legend->clearItems();
+  ui->customPlot->replot();
 
   ui->priceDeltaPlot->clearGraphs();
   ui->priceDeltaPlot->clearPlottables();
   ui->priceDeltaPlot->legend->clearItems();
+  ui->priceDeltaPlot->replot();
 }
 
 void MainDialog::setupNormalizedGraphData() {
@@ -1977,7 +1996,9 @@ void MainDialog::startWebsocket() {
       m_elapsedTime.restart();
       QObject::connect(
           &m_timerPlot, &QTimer::timeout, m_graphUpdater.worker.get(), [this] {
+            m_graphPlotter.mutex.lock();
             m_lastKeyUsed = m_elapsedTime.elapsed() / 1'000.0;
+            m_graphPlotter.mutex.unlock();
 
             // update the min max on the y-axis every second
             bool const updatingMinMax =
@@ -1985,8 +2006,10 @@ void MainDialog::startWebsocket() {
             if (updatingMinMax)
               m_lastGraphPoint = m_lastKeyUsed;
 
-            onPriceDeltaGraphTimerTick(updatingMinMax, m_lastKeyUsed);
-            onNormalizedGraphTimerTick(updatingMinMax, m_lastKeyUsed);
+            if (m_calculatingPriceAverage)
+              onPriceDeltaGraphTimerTick(updatingMinMax);
+            if (m_calculatingNormalPrice)
+              onNormalizedGraphTimerTick(updatingMinMax);
           });
       m_lastGraphPoint = 0.0;
       auto const timerTick = getTimerTickMilliseconds();
@@ -2010,7 +2033,7 @@ void MainDialog::startWebsocket() {
                      &MainDialog::calculateAveragePriceDifference);
     m_averagePriceDifferenceTimer->start();
   }
-  m_graphPlotter.timer.start(std::chrono::milliseconds(300));
+  m_graphPlotter.timer.start(std::chrono::milliseconds(100));
 }
 
 bool calculateSimpleGraphMinMax(QCPGraph *graph, QCPRange const &range,
@@ -2188,12 +2211,8 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
           QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
       data.signalTime = crossOverValue.time;
 
-      if (m_calculatingNormalPrice) {
-        emit newOrderDetected(std::move(crossOverValue), std::move(data),
-                              value.exchange, value.tradeType);
-      } else {
-        qDebug() << "Man, how did we get here again?";
-      }
+      emit newOrderDetected(std::move(crossOverValue), std::move(data),
+                            value.exchange, value.tradeType);
       value.crossedOver = false;
       value.crossOver.reset();
     }
@@ -2233,12 +2252,10 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   }
 
   value.prevNormalizedPrice = value.normalizedPrice;
+  value.graph->addData(key, value.normalizedPrice);
   value.graph->setName(QString(legendDisplayFormat)
                            .arg(value.legendName)
                            .arg(value.graphPointsDrawnCount));
-
-  if (m_calculatingNormalPrice)
-    value.graph->addData(key, value.normalizedPrice);
 
   if (refResult.isResettingRef || isResettingSymbols)
     resetTickerData(refResult.isResettingRef, isResettingSymbols);
@@ -2251,18 +2268,12 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   }
 }
 
-void MainDialog::onNormalizedGraphTimerTick(bool const updatingMinMax,
-                                            double const key) {
+void MainDialog::onNormalizedGraphTimerTick(bool const updatingMinMax) {
   calculatePriceNormalization();
-  updateGraphData(key, updatingMinMax);
-
-  m_graphPlotter.mutex.lock();
-  m_graphPlotter.lastKey = key;
-  m_graphPlotter.mutex.unlock();
+  updateGraphData(m_lastKeyUsed, updatingMinMax);
 }
 
-void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
-                                            double const key) {
+void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate) {
   if (m_priceDeltas.empty())
     return;
 
@@ -2271,6 +2282,7 @@ void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
   if (a == 0.0 || b == 0.0)
     return;
 
+  auto const key = m_lastKeyUsed;
   double const result = (a + b) / (b == 0.0 ? 1.0 : b);
   double const keyStart =
       (key >= m_maxVisiblePlot ? (key - m_maxVisiblePlot) : 0.0);
@@ -2294,9 +2306,7 @@ void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
     }
   }
 
-  if (m_calculatingPriceAverage)
-    graph->addData(key, result);
-
+  graph->addData(key, result);
   if (m_maxAverageThreshold == 0.0 || m_lastPriceAverage == 0.0)
     return;
   if (result > m_averageUp) {
@@ -2337,7 +2347,7 @@ void MainDialog::makePriceAverageOrder(
 
 void MainDialog::updatePlottingKey() {
   m_graphPlotter.mutex.lock();
-  auto const lastKey = m_graphPlotter.lastKey;
+  auto const lastKey = m_lastKeyUsed;
   m_graphPlotter.mutex.unlock();
 
   // make `key` axis range scroll right with the data at a
