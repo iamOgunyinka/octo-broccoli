@@ -281,6 +281,7 @@ private:
   bool m_hasReferences = false;
   bool m_tradeOpened = false;
   bool m_calculatingNormalPrice = true;
+  bool m_calculatingPriceAverage = false;
   bool& m_warnOnExit;
 };
 

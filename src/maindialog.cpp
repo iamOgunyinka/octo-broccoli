@@ -695,6 +695,7 @@ void MainDialog::stopGraphPlotting(bool const requestConfirmation) {
 
   enableUIComponents(true);
   m_calculatingNormalPrice = true;
+  m_calculatingPriceAverage = false;
 
   korrelator::plug_data_t data;
   data.tradeType = trade_type_e::unknown;
@@ -1254,7 +1255,7 @@ void MainDialog::readAppConfigFromFile() {
   {
     auto const priceWidgetChecked = ui->activatePriceDiffCheckbox->isChecked();
     for (int i = 0; i < priceDeltaJsonList.size(); ++i) {
-      QJsonObject const obj = tokenJsonList[i].toObject();
+      QJsonObject const obj = priceDeltaJsonList[i].toObject();
       auto const tokenName = obj["symbol"].toString().toUpper();
       auto const tradeType = obj["market"].toString().toLower() == "spot"
                                  ? trade_type_e::spot
@@ -1827,6 +1828,9 @@ bool MainDialog::validateUserInput() {
   m_calculatingNormalPrice =
       m_orderOrigin == korrelator::order_origin_e::from_both ||
       m_orderOrigin == korrelator::order_origin_e::from_price_normalization;
+  m_calculatingPriceAverage =
+      m_orderOrigin == korrelator::order_origin_e::from_both ||
+      m_orderOrigin == korrelator::order_origin_e::from_price_average;
   return true;
 }
 
@@ -2258,7 +2262,9 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   value.graph->setName(QString(legendDisplayFormat)
                            .arg(value.legendName)
                            .arg(value.graphPointsDrawnCount));
-  value.graph->addData(key, value.normalizedPrice);
+
+  if (m_calculatingNormalPrice)
+    value.graph->addData(key, value.normalizedPrice);
 
   if (refResult.isResettingRef || isResettingSymbols)
     resetTickerData(refResult.isResettingRef, isResettingSymbols);
@@ -2314,7 +2320,9 @@ void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate,
     }
   }
 
-  graph->addData(key, result);
+  if (m_calculatingPriceAverage)
+    graph->addData(key, result);
+
   if (m_maxAverageThreshold == 0.0 || m_lastPriceAverage == 0.0)
     return;
   if (result > m_averageUp) {
@@ -2363,8 +2371,12 @@ void MainDialog::updatePlottingKey() {
   ui->customPlot->xAxis->setRange(lastKey, m_maxVisiblePlot, Qt::AlignRight);
   ui->priceDeltaPlot->xAxis->setRange(lastKey, m_maxVisiblePlot,
                                       Qt::AlignRight);
-  ui->customPlot->replot();
-  ui->priceDeltaPlot->replot();
+
+  if (m_calculatingPriceAverage)
+    ui->priceDeltaPlot->replot();
+
+  if (m_calculatingNormalPrice)
+    ui->customPlot->replot();
 }
 
 void MainDialog::resetTickerData(const bool resetRefs,
