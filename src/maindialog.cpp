@@ -1804,6 +1804,7 @@ bool MainDialog::validateUserInput() {
   m_calculatingPriceAverage =
       m_orderOrigin == korrelator::order_origin_e::from_both ||
       m_orderOrigin == korrelator::order_origin_e::from_price_average;
+
   return true;
 }
 
