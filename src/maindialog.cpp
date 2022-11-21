@@ -1996,9 +1996,11 @@ void MainDialog::startWebsocket() {
       m_elapsedTime.restart();
       QObject::connect(
           &m_timerPlot, &QTimer::timeout, m_graphUpdater.worker.get(), [this] {
-            m_graphPlotter.mutex.lock();
-            m_lastKeyUsed = m_elapsedTime.elapsed() / 1'000.0;
-            m_graphPlotter.mutex.unlock();
+
+            {
+              std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
+              m_lastKeyUsed = m_elapsedTime.elapsed() / 1'000.0;
+            }
 
             // update the min max on the y-axis every second
             bool const updatingMinMax =
@@ -2023,7 +2025,7 @@ void MainDialog::startWebsocket() {
   m_graphUpdater.worker->moveToThread(m_graphUpdater.thread.get());
   m_graphUpdater.thread->start();
 
-  QTimer::singleShot(std::chrono::milliseconds(10'000), this, [this] {
+  QTimer::singleShot(std::chrono::milliseconds(5'000), this, [this] {
     m_tradeOpened = true;
     calculateAveragePriceDifference();
   });
@@ -2139,9 +2141,13 @@ MainDialog::updateRefGraph(double const keyStart, double const keyEnd,
   }
 
   value.prevNormalizedPrice = value.normalizedPrice;
-  value.graph->setName(
-      QString("%1(%2)").arg(value.legendName).arg(value.graphPointsDrawnCount));
-  value.graph->addData(keyEnd, value.normalizedPrice);
+
+  {
+    std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
+    value.graph->setName(QString("%1(%2)").arg(value.legendName).arg(value.graphPointsDrawnCount));
+    value.graph->addData(keyEnd, value.normalizedPrice);
+  }
+
   return refResult;
 }
 
@@ -2252,10 +2258,13 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
   }
 
   value.prevNormalizedPrice = value.normalizedPrice;
-  value.graph->addData(key, value.normalizedPrice);
-  value.graph->setName(QString(legendDisplayFormat)
-                           .arg(value.legendName)
-                           .arg(value.graphPointsDrawnCount));
+  {
+    std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
+    value.graph->addData(key, value.normalizedPrice);
+    value.graph->setName(QString(legendDisplayFormat)
+                             .arg(value.legendName)
+                             .arg(value.graphPointsDrawnCount));
+  }
 
   if (refResult.isResettingRef || isResettingSymbols)
     resetTickerData(refResult.isResettingRef, isResettingSymbols);
@@ -2264,7 +2273,10 @@ void MainDialog::updateGraphData(double const key, bool const updatingMinMax) {
     auto const diff = (refResult.maxValue - refResult.minValue) / 19.0;
     refResult.minValue -= diff;
     refResult.maxValue += diff;
-    ui->customPlot->yAxis->setRange(refResult.minValue, refResult.maxValue);
+    {
+      std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
+      ui->customPlot->yAxis->setRange(refResult.minValue, refResult.maxValue);
+    }
   }
 }
 
@@ -2302,11 +2314,19 @@ void MainDialog::onPriceDeltaGraphTimerTick(bool const minMaxNeedsUpdate) {
       auto const diff = (maxValue - minValue) / 11.0;
       minValue -= diff;
       maxValue += diff;
-      ui->priceDeltaPlot->yAxis->setRange(minValue, maxValue);
+
+      {
+        std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
+        ui->priceDeltaPlot->yAxis->setRange(minValue, maxValue);
+      }
     }
   }
 
-  graph->addData(key, result);
+  {
+    std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
+    graph->addData(key, result);
+  }
+
   if (m_maxAverageThreshold == 0.0 || m_lastPriceAverage == 0.0)
     return;
   if (result > m_averageUp) {
@@ -2356,11 +2376,21 @@ void MainDialog::updatePlottingKey() {
   ui->priceDeltaPlot->xAxis->setRange(lastKey, m_maxVisiblePlot,
                                       Qt::AlignRight);
 
-  if (m_calculatingPriceAverage)
+  if (m_calculatingNormalPrice && m_calculatingPriceAverage){
+    std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
     ui->priceDeltaPlot->replot();
-
-  if (m_calculatingNormalPrice)
     ui->customPlot->replot();
+  }
+
+  if (m_calculatingPriceAverage) {
+    std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
+    ui->priceDeltaPlot->replot();
+  }
+
+  if (m_calculatingNormalPrice) {
+    std::lock_guard<std::mutex> lock_g(m_graphPlotter.mutex);
+    ui->customPlot->replot();
+  }
 }
 
 void MainDialog::resetTickerData(const bool resetRefs,
@@ -2624,6 +2654,7 @@ void MainDialog::tradeExchangeTokens(
 
   while (true) {
     firstMetadata = tokenPlugs.get();
+
     if (firstMetadata.tradeType == trade_type_e::unknown)
       tokenPlugs.clear();
 
